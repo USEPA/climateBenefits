@@ -1,0 +1,517 @@
+---
+title: "Climate Benefits of Nutrient Management"
+author: "J. Beaulieu, E. Kopits, C. Moore, B. Parthum"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    fig_caption: yes
+    depth: 2
+    number_sections: true
+    code_folding:  hide
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup R
+```{r results='hide', message=FALSE, warning=FALSE}
+# R 3.6.1 
+library(tidyverse) # dplyr, ggplot2,...
+library(scales)
+library(readxl) # read excel file readData.R
+library(sf) # spatial data
+library(USAboundaries) # for map in readData.R
+library(kableExtra) # nice tables
+
+# Define local path for each user.  Will enable reading data from 
+# 'Climate benefits of mutrient management' OneDrive folder maintained by Chris Moore
+localPath <- Sys.getenv("USERPROFILE")
+
+# Print R session info
+print(sessionInfo())
+```
+
+# Background
+
+Lakes and reservoirs are sources of the greenhouse gases (GHG) methane (CH~4~), carbon dioxide (CO~2~), and nitrous oxide (N~2~O).  Emission rates (mass of GHG/unit time/unit area) tend to increase with lake nutrient and chlorophyll (chl) concentrations.  Water quality regulations that limit nutrient loading to surface waters could lead to reduced lake nutrient and chl content, thereby indirectly reducing GHG emission rates.  
+
+In this project we combined modeled chl and nutrient concentrations for ~4000 lakes in the Chesepeake watershed under 1) psuedo current conditions,  and 2) a hypothetical future scenario where water quality regulations have reduced lake nutrient and chl concentration.  These estimates were combined with published models (DelSontro et al. 2018) that predict GHG emission rates from lake chl and nutrient concentration.  The objective of the project is to quantify the aggregate reduction in GHG emissions from the ~4000 lakes following the water quality improvement.  The reduction in GHG emissions is called the 'incremental' change.
+
+# Methods
+## Lake Model
+
+Retired EPA researcher Bryan Milstead used the 'Northeast Lakes' model to estimate chl for lakes within the Chesapeake Bay watershed.  Chlorophyll was modeled under the 2010 and TMDLnew scenarios as defined below:
+
+**2010** – represents an estimate of “current” load levels and uses estimated 2010 land uses, animal populations, atmospheric deposition, and point source loads (our “constant baseline” scenario for the SP study, probably a good candidate for our baseline).   
+
+**TMDLnew** - Based on the final WIPs approved by EPA and air deposition that would meet 2020 air quality standards.
+
+The modeled chl and nutrient concentrations are reported in ChesLakeLoadsConc.xlsx.
+
+```{r}
+chesDat <- read_excel(paste0(localPath, 
+                             "/Environmental Protection Agency (EPA)/",
+                             "Moore, Chris - Climate benefits of nutrient management/",
+                             "Lakes Modeling/ChesLakeLoadsConc.xlsx"),
+                      sheet = "ChesLakeConc")
+
+```
+
+The model includes `r chesDat %>% nrow()` waterbodies.  Modeled chl and TP concentrations under the 2010 scenario average `r chesDat %>% summarize(meanChl = mean(Chla2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^ and `r chesDat %>% summarize(meanChl = mean(Pin2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^, respectively, which are reasonable environmental values.  The model predicts that lake chl and TP will be reduced by `r chesDat %>% mutate(chlReduction = ((Chla2010 - ChlaTMDLnew) / Chla2010) * 100) %>% summarize(percentRed = mean(chlReduction, na.rm = TRUE)) %>% pull() %>% round(1)`% and `r chesDat %>% mutate(tpReduction = ((Pin2010 - PinTMDLnew) / Pin2010) * 100) %>% summarize(percentRed = mean(tpReduction, na.rm = TRUE)) %>% pull() %>% round(1)`%, respectively, under the TMDLnew scenario. 
+```{r }
+chl.p.summary <- do.call(cbind, lapply(chesDat %>% select(Chla2010, Pin2010) %>% 
+                                         mutate_all(~.*1000), summary)) %>% # *1000 mg/L to ug/L
+  as.data.frame() %>%
+  rownames_to_column(var = 'statistic') %>% 
+  mutate_at(vars(contains("2010")), round, digits = 4)
+  
+chl.p.summary %>% kbl(col.names = c("statistic", "2010 chl", "2010 TP")) %>% kable_classic()
+```
+Each waterbody in the lake model output is uniquely identified by a 'WB_ID' value.  These values correspond to 'COMID' values in the NHDPlusV2 dataset, a spatial database of U.S. waterbodies.  Below we merge these data sets to combine the model output with other waterbody characteristics in NHDPlusV2, including waterbody surface areas.
+
+``` {r results='hide', warning = FALSE, message = FALSE}
+# 50 seconds
+nhdSf <- st_read(dsn = paste0(localPath, 
+                               "/Environmental Protection Agency (EPA)/",
+                               "Moore, Chris - Climate benefits of nutrient management/",
+                               "analysis/store/",
+                               "NHDPlusV21_National_Seamless_Flattened_Lower48.gdb"),
+                 layer = "NHDWaterbody") %>%
+  select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
+         GNIS_ID, GNIS_NAME, AREASQKM, 
+         ELEVATION, REACHCODE, FTYPE, FCODE,
+         ONOFFNET, PurpCode, PurpDesc,
+         MeanDepth, LakeVolume, MaxDepth, MeanDUsed, MeanDCode) # lakeMorpho data
+
+st_crs(nhdSf) # 4269, NAD83
+dim(nhdSf) # 448512 waterbodies
+dim(chesDat) # 4247 waterbodies in Chesepeake Bay simulations
+
+# we assume chesDat$WB_ID == nhdSf$COMID.  Are all WB_ID in NHD?
+chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% nrow() # 25 waterbodies not in NHD
+
+chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% # nothing obviously wrong with values.
+  select(WB_ID) %>% print(n=Inf)
+
+
+# merge datasets
+dat.sf <- merge(nhdSf, chesDat, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all chesDat observations
+  mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
+  select(-COMID) %>% # remove residual COMID column
+  st_transform(5070) # Transform to Albers for making map of US
+
+dim(dat.sf) # 4247, good, kept all data
+
+#  All WB_ID preserved from chesDat?
+sum(!(dat.sf$WB_ID %in% chesDat$WB_ID)) # all are present in chesDat
+sum(!(chesDat$WB_ID %in% dat.sf$WB_ID)) # all chesDat WB_ID in dat
+
+# how many missing AREASQKM?
+dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
+```
+
+```{r fig.cap = "Location of 4,247 waterbodies in Chesapeake Bay model"}
+# Map to make sure we are in correct region.
+states <- us_states() %>% # get states map
+  filter(name %in% c("Virginia", "Maryland", "Delaware",
+                     "West Virginia", "Pennsylvania", "New York")) %>%
+  st_transform(5070)
+
+# Make a quick map.
+# This seems about right.
+ggplot(states) +
+  geom_sf() +
+  geom_sf(data = dat.sf)
+
+dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
+```
+
+
+
+# GHG model
+DelSontro et al. (2018) present linear regression models based on literature reports of chl concentration (ug/L), TP concentration (ug/L) and areal GHG emission rates (mg CH~4~-C m^-2^ day^-1^).  The models were created on the log-log scale with a small positive offset to accommodate negative areal emission rates reported in the literature.  Below we read in the model objects.
+
+```{r}
+# Total CH4 model.  mg CH4-C m-2 d-1
+# read from disk
+mod.ch4 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
+                       "/Environmental Protection Agency (EPA)/",
+                       "Moore, Chris - Climate benefits of nutrient management/",
+                       "analysis/climateBenefits_jb/models/pCh4.rds"))
+
+summary(mod.ch4) # review model
+
+# CO2 model.  mg CO2-C m-2 d-1
+mod.co2 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
+                       "/Environmental Protection Agency (EPA)/",
+                       "Moore, Chris - Climate benefits of nutrient management/",
+                       "analysis/climateBenefits_jb/models/pCo2.rds"))
+
+summary(mod.co2) # review model
+
+
+# N2O model. mg N2O-n m-2 day-1
+mod.n2o <- readRDS(paste0(Sys.getenv("USERPROFILE"),
+                       "/Environmental Protection Agency (EPA)/",
+                       "Moore, Chris - Climate benefits of nutrient management/",
+                       "analysis/climateBenefits_jb/models/pn2o.rds"))
+
+summary(mod.n2o) # review model
+```
+
+
+The models predict emission rates as log10(emission rate + positive offset) with the emission rate in units of mg CH~4~-C m^-2^ day^-1^, mg CO~2~-C m^-2^ day^-1^, or mg N~2~O-N m^-2^ day^-1^.  Predictions are back transformed to linear space and converted from mg of C or N, to mass of CH~4~, CO~2~, or N~2~O via helper functions.
+
+```{r}
+# little function to get CH4 in desired units
+pCh4 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CH4-C m-2 d-1)
+  mgCh4c <- 10^(x) - 1 # unlog, then subtract 1
+  mgCh4 <- mgCh4c * (16/12) # mg CH4-C -> mg CH4
+  return(mgCh4)
+}
+
+# little function to get CO2 in desired units
+pCo2 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CO2-C m-2 d-1)
+  mgCo2c <- 10^(x) - 43 # unlog, then subtract 43
+  mgCo2 <- mgCo2c * (44/12) # mg CO2-C -> mg CO2
+  return(mgCo2)
+}
+
+# little function to get N2O in desired units
+pN2o <- function(x) { # x is output from above model which predicts log10(N2O-N)  (mg N2O-N m-2 d-1)
+  mgN2on <- 10^(x) - 0.25 # unlog, then subtract 0.25
+  mgN2o <- mgN2on * (44/14) # mg N2O-N -> mg N2O
+  return(mgN2o)
+}
+```
+
+## GHG Emissions and Uncertainty Estimates
+
+We use the DelSontro et al. (2018) models to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) for each waterbody under the 2010 and TMDLnew scenarios.  Uncertainty was estimated using two approaches.  
+
+### Predict mean areal emission rates (mg GHG m^-2^ day^-1^) and 95% confidence interval 
+In the first approach, we calculate the 95% confidence interval of the model prediction using the 'interval' argument in the predict() function.  This results in a prediction of the mean areal emission rate, lower 2.5 percentile, and upper 97.5 percentile for each waterbody. 
+
+```{r}
+    
+dat <- dat %>% 
+  mutate(ChlaDiff = Chla2010 - ChlaTMDLnew , # policy effect on chla
+         PinDiff = Pin2010 - PinTMDLnew,  # policy effect on P
+         
+         # CH4
+         # 2010 emissions
+         ch42010 = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                           # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                           newdata = list(Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chla2010 is mg/l.
+                           interval = "confidence")[,1] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1
+         ch42010.lwr = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                           # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                           newdata = list(Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chla2010 is mg/l.
+                           interval = "confidence")[,2] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1         
+         ch42010.upr = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                           # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                           newdata = list(Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chla2010 is mg/l.
+                           interval = "confidence")[,3] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1
+      
+         
+         # TMDL emissions
+         ch4TMDLnew = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                              # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                              newdata = list(Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000), # *1000 because chla is mg/l.
+                              interval = "confidence")[,1] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1
+         ch4TMDLnew.lwr = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                              # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                              newdata = list(Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000), # *1000 because chla is mg/l.
+                              interval = "confidence")[,2] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1
+         ch4TMDLnew.upr = predict(mod.ch4, # kettlebell model.  predicts log10(mgCH4-c m-2 d-1 + 1)
+                              # model expects Chlorophyll.a..ug.L., must tell it which data to use
+                              newdata = list(Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000), # *1000 because chla is mg/l.
+                              interval = "confidence")[,3] %>%
+           pCh4(.), # function to convert to mg Ch4 m-2 d-1
+         
+         
+         # CO2
+         # 2010 emissions
+         co22010 = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 43)
+                           # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                           interval = "confidence")[,1] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1
+         co22010.lwr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
+                           # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                           interval = "confidence")[,2] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1         
+         co22010.upr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
+                         # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                           interval = "confidence")[,3] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1
+      
+         
+         # TMDL emissions
+         co2TMDLnew = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                              interval = "confidence")[,1] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1
+         co2TMDLnew.lwr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                              interval = "confidence")[,2] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1
+         co2TMDLnew.upr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                              interval = "confidence")[,3] %>%
+           pCo2(.), # function to convert to mg co2 m-2 d-1
+         
+         # N2O
+         # 2010 emissions
+         n2o2010 = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 43)
+                           # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chl is mg/l.
+                           interval = "confidence")[,1] %>%
+           pN2o(.), # function to convert to mg n2o m-2 d-1
+         n2o2010.lwr = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 1)
+                           # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                           Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chl is mg/l.
+                           interval = "confidence")[,2] %>%
+           pN2o(.), # function to convert to mg n2o m-2 d-1         
+         n2o2010.upr = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 1)
+                         # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                           Chlorophyll.a..ug.L. = .$Chla2010 * 1000),  # *1000 because chl is mg/l.
+                           interval = "confidence")[,3] %>%
+           pN2o(.), # function to convert to mg n2o m-2 d-1
+      
+         
+         # TMDL emissions
+         n2oTMDLnew = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000),  # *1000 because chl is mg/l.
+                              interval = "confidence")[,1] %>%
+           pN2o(.), # function to convert to mg n2o m-2 d-1
+         n2oTMDLnew.lwr = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000),  # *1000 because chl is mg/l.
+                              interval = "confidence")[,2] %>%
+           pN2o(.), # function to convert to mg n2o m-2 d-1
+         n2oTMDLnew.upr = predict(mod.n2o, # kettlebell model.  predicts log10(mgn2o-c m-2 d-1 + 1)
+                             # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
+                           newdata = list(Surface.Area..km2. = .$AREASQKM,
+                                          Chlorophyll.a..ug.L. = .$ChlaTMDLnew * 1000),  # *1000 because chl is mg/l.
+                              interval = "confidence")[,3] %>%
+           pN2o(.)) # function to convert to mg n2o m-2 d-1
+
+dat[1:5,] %>% select(WB_ID, contains("n2o")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile N2O emission rate (mg N2O m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat[1:5,] %>% select(WB_ID, contains("co2")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile CO2 emission rate (mg CO2 m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat[1:5,] %>% select(WB_ID, contains("ch4")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile CH4 emission rate (mg CH4 m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+```
+
+
+### Upscale to mg GHG day^-1^
+The next step is to convert the areal emission rates (mg GHG m^-2^ day^-1^) to a daily emission (mg GHG day^-1^) for each waterbody.  
+
+
+``` {r}
+
+dat <- dat %>% mutate(
+  # CH4
+  # 2010: upscale to per lake per day emissions
+  ch42010.lk.d = ch42010 * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
+  ch42010.lk.d.lwr = ch42010.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
+  ch42010.lk.d.upr = ch42010.upr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
+  
+  # TMDLNew: upscale to per lake per day emisions
+  ch4TMDLnew.lk.d = ch4TMDLnew * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+  ch4TMDLnew.lk.d.lwr = ch4TMDLnew.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+  ch4TMDLnew.lk.d.upr = ch4TMDLnew.upr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+  
+  # CO2
+  # 2010: upscale to per lake per day emissions
+  co22010.lk.d = co22010 * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CO2 d-1
+  co22010.lk.d.lwr = co22010.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CO2 d-1
+  co22010.lk.d.upr = co22010.upr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg CO2 d-1
+  
+  # TMDLNew: upscale to per lake per day emisions
+  co2TMDLnew.lk.d = co2TMDLnew * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CO2 d-1
+  co2TMDLnew.lk.d.lwr = co2TMDLnew.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CO2 d-1
+  co2TMDLnew.lk.d.upr = co2TMDLnew.upr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg CO2 d-1 
+  
+  # N2O
+  # 2010: upscale to per lake per day emissions
+  n2o2010.lk.d = n2o2010 * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg N2O d-1
+  n2o2010.lk.d.lwr = n2o2010.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg N2O d-1
+  n2o2010.lk.d.upr = n2o2010.upr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  mg N2O d-1
+  
+  # TMDLNew: upscale to per lake per day emisions
+  n2oTMDLnew.lk.d = n2oTMDLnew * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg N2O d-1
+  n2oTMDLnew.lk.d.lwr = n2oTMDLnew.lwr * 1000000 * AREASQKM, # 1000000m2 = 1km2.  new variable in mg N2O d-1
+  n2oTMDLnew.lk.d.upr = n2oTMDLnew.upr * 1000000 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+
+
+dat[1:5, ] %>% select(WB_ID, matches("n2o.*lk.d")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily N2O emission (mg N2O day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat[1:5, ] %>% select(WB_ID, matches("co2.*lk.d")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily CO2 emission (mg CO2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat[1:5, ] %>% select(WB_ID, matches("ch4.*lk.d")) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily CH4 emission (mg CH4 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+
+```
+
+### Upscale daily emissions to annual emissions
+The models used to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) are based on published measurements, most of which were made during the warm summer months when emission rates are expected to be greatest.  We therefore assume the predicted areal emission rates are constant during the open-water season.  During periods of ice cover, which conservatively extend from Nov.15 - March 15 in the Chesapeake Bay watershed, areal emission rates are zero.  
+
+```{r}
+dat <- dat %>%
+  select(WB_ID, contains("lk.d")) %>%
+  mutate_at(vars(-WB_ID), function(x) x * (365 - 120)) %>% # 120 days of ice cover
+  rename_at(vars(-WB_ID), function(x) gsub(".d", ".yr", x))
+```
+
+
+
+### Sum annual emissions across all waterbodies.
+We can now sum the total annual emissions (metric tons of GHG) across all waterbodies and both scenarios.
+
+```{r}
+dat.sum <- dat %>% 
+  select(contains("lk.yr")) %>%
+ summarize_all(sum, na.rm = TRUE) %>%
+  mutate_all(~. / (1000*1000*1000)) %>% # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg)
+  rename_all(function(x) paste0(x, ".sum")) %>%
+  rename_all(function(x) gsub("lk.", "", x))
+
+dat.sum %>% select(matches("n2o.*.yr")) %>%
+  mutate_all(round, digits = 0) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual N2O emission (metric tons N2O day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat.sum %>% select(matches("co2.*.yr")) %>%
+  mutate_all(round, digits = 0) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual CO2 emission (metric tons CO2 day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+dat.sum %>% select(matches("ch4.*.yr")) %>%
+  mutate_all(round, digits = 0) %>%
+  kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual CH4 emission (metric tons CH4 day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
+  kable_classic()
+
+```
+
+### Calculate incremental change
+
+The 'incremental change' is defined as the difference in emissions between the '2010' and 'TMDLnew' scenarios.  The mean incremental change is simply calculated as the difference between the model predicted 'mean' values.  The upper 97.5 percentile of the incremental change can be calculated as the difference between the 2010 97.5 percentile and the TMDLnew 97.5 percentile.  The lower 2.5 percentile can be calculated as the difference between the 2010 and TMDLnew lower 2.5 percentile.
+
+<!-- This calculation leads to very wide confidence intervals, including negative values for N~2~O and CO~2~.  This is probably not the best way to estimate uncertainty; however, the 'mean' estimates should be pretty good. -->
+
+```{r}
+dat.sum <- dat.sum %>%
+   # incremental change (metric tons yr-1)
+  mutate(ch4incr.yr = ch42010.yr.sum - ch4TMDLnew.yr.sum, 
+         ch4incr.yr.upr = ch42010.yr.upr.sum - ch4TMDLnew.yr.upr.sum, 
+         ch4incr.yr.lwr = ch42010.yr.lwr.sum - ch4TMDLnew.yr.lwr.sum,
+         
+         # CO2
+         co2incr.yr = co22010.yr.sum - co2TMDLnew.yr.sum, 
+         co2incr.yr.upr = co22010.yr.upr.sum - co2TMDLnew.yr.upr.sum, 
+         co2incr.yr.lwr = co22010.yr.lwr.sum - co2TMDLnew.yr.lwr.sum,
+         
+         # N2O
+         n2oincr.yr = n2o2010.yr.sum - n2oTMDLnew.yr.sum, 
+         n2oincr.yr.upr = n2o2010.yr.upr.sum - n2oTMDLnew.yr.upr.sum, 
+         n2oincr.yr.lwr = n2o2010.yr.lwr.sum - n2oTMDLnew.yr.lwr.sum) 
+
+
+dat.sum %>% 
+  select(ch4incr.yr, ch4incr.yr.upr, ch4incr.yr.lwr, co2incr.yr, co2incr.yr.upr, 
+         co2incr.yr.lwr, n2oincr.yr, n2oincr.yr.upr, n2oincr.yr.lwr) %>%
+  mutate_at(vars(!contains("n2o", ignore.case = TRUE)), function(x) round(x, 0)) %>%
+  mutate_at(vars(contains("n2o", ignore.case = TRUE)), function(x) round(x, 1))  %>%
+  kbl(col.names = rep(c("mean", "upper 97.5", "lower 2.5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from model prediction error") %>%
+  add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+```
+
+### Incremental change and uncertainty with bootstrapping
+
+An alternative approach to estimating uncertainty is to bootstrap a sample from the `r chesDat %>% nrow()` waterbodies in the data.  This approach assumes the statistical predictions are correct, then simulates sampling error by bootstrapping across the sample.  As shown below, this generates much narrower confidence intervals than the approach utilizing the statistical prediction error.
+
+```{r}
+# CALCULATE GHG EMISSIONS, AND INCREMENTAL CHANGES FOR GHG, CHLA, AND P-------------------
+# 33 minutes in got 'Error: cannot allocate vector of size 33 kb'
+
+# 
+ghg <- list() # empty list to hold results
+# time.i <- print(Sys.time())
+for(i in 1:100) { # 4 minutes
+  #print(i) # print status update
+  tmpData <- dat[sample(1:nrow(dat), replace = TRUE), ] # bootstrap piece: sample with replacement
+  ghg[[i]] <- tmpData %>% # assign object to element i of list
+    select("WB_ID", !contains("yr.")) # exclude the upper and lower confidence estimates
+}
+# time.i; print(Sys.time())
+
+# simulated incremental GHG
+simIncrGhg <- lapply(ghg, function(x) {
+  # sum incremental difference across all lakes
+  x %>% summarise(incrementalCh4 = (sum(ch42010.lk.yr, na.rm = TRUE) - sum(ch4TMDLnew.lk.yr, na.rm = TRUE)),
+                  incrementalCo2 = (sum(co22010.lk.yr, na.rm = TRUE) - sum(co2TMDLnew.lk.yr, na.rm = TRUE)),
+                  incrementalN2o = (sum(n2o2010.lk.yr, na.rm = TRUE) - sum(n2oTMDLnew.lk.yr, na.rm = TRUE))) %>%
+    mutate_all(function(x) x / (1000*1000*1000)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg)
+}) %>%
+  do.call("rbind", .) %>% # collapse to tibble
+  summarise(incrCh4 = mean(incrementalCh4), # mean CH4 increment across all lakes 
+            incrCh4upr = quantile(incrementalCh4, 0.975), # upper 95% increment across all lakes
+            incrCh4lwr = quantile(incrementalCh4, 0.025), # lower 5% increment across all lakes
+            #CO2
+            incrCo2 = mean(incrementalCo2), # mean CO2 increment across all lakes 
+            incrCo2upr = quantile(incrementalCo2, 0.975), # upper 95% increment across all lakes
+            incrCo2lwr = quantile(incrementalCo2, 0.025), # lower 5% increment across all lakes
+            #N2O
+            incrN2o = mean(incrementalN2o), # mean N2o increment across all lakes 
+            incrN2oupr = quantile(incrementalN2o, 0.975), # upper 95% increment across all lakes
+            incrN2olwr = quantile(incrementalN2o, 0.025)) # lower 5% increment across all lakes
+
+simIncrGhg %>%
+  mutate_at(vars(!contains("n2o", ignore.case = TRUE)), function(x) round(x, 0)) %>%
+  mutate_at(vars(contains("n2o", ignore.case = TRUE)), function(x) round(x, 1)) %>%
+  kbl(col.names = rep(c("mean", "upper 97.5", "lower 2.5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from bootstrapping.") %>%
+   add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+```
