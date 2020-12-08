@@ -2,7 +2,7 @@
 
 ## Jake Beaulieu (US EPA ORD), Elizabeth Kopits (US EPA NCEE), Chris Moore (US EPA NCEE), Bryan Parthum (US EPA NCEE)
 
-This repo contains data and code for estimating climate benefits of nutrient management. A summary of the results and methods can be found in the summary document `Climate-Benefits-of-Nutrient-Management.html`. 
+This repo contains data and code for estimating climate benefits of nutrient management. A summary of the results and methods can be found in the summary document `store/Climate-Benefits-of-Nutrient-Management.html`. 
 
 > **Abstract:** Eutrophication in lakes and reservoirs contributes to emissions of carbon dioxide, methane, and nitrous oxide.  Surface water regulations that reduce nutrient loadings also reduce eutrophication and associated GHG emissions, but this benefit has not been quantified or monetized.  This project will combine results from the Northeast Lakes Model (an extension of SPARROW), models linking eutrophication to GHG emissions, and estimated values for the social costs of carbon dioxide, methane and nitrous oxide to value the climate benefits of the Chesapeake Bay TMDL.  
 
