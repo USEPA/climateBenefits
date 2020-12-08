@@ -24,6 +24,8 @@ library(readxl) # read excel file readData.R
 library(sf) # spatial data
 library(USAboundaries) # for map in readData.R
 library(kableExtra) # nice tables
+library(MASS)
+library(magrittr)
 
 # Define local path for each user.  Will enable reading data from 
 # 'Climate benefits of mutrient management' OneDrive folder maintained by Chris Moore
@@ -61,7 +63,7 @@ chesDat <- read_excel(paste0(localPath,
 
 The model includes `r chesDat %>% nrow()` waterbodies.  Modeled chl and TP concentrations under the 2010 scenario average `r chesDat %>% summarize(meanChl = mean(Chla2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^ and `r chesDat %>% summarize(meanChl = mean(Pin2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^, respectively, which are reasonable environmental values.  The model predicts that lake chl and TP will be reduced by `r chesDat %>% mutate(chlReduction = ((Chla2010 - ChlaTMDLnew) / Chla2010) * 100) %>% summarize(percentRed = mean(chlReduction, na.rm = TRUE)) %>% pull() %>% round(1)`% and `r chesDat %>% mutate(tpReduction = ((Pin2010 - PinTMDLnew) / Pin2010) * 100) %>% summarize(percentRed = mean(tpReduction, na.rm = TRUE)) %>% pull() %>% round(1)`%, respectively, under the TMDLnew scenario. 
 ```{r }
-chl.p.summary <- do.call(cbind, lapply(chesDat %>% select(Chla2010, Pin2010) %>% 
+chl.p.summary <- do.call(cbind, lapply(chesDat %>% dplyr::select(Chla2010, Pin2010) %>% 
                                          mutate_all(~.*1000), summary)) %>% # *1000 mg/L to ug/L
   as.data.frame() %>%
   rownames_to_column(var = 'statistic') %>% 
@@ -79,7 +81,7 @@ nhdSf <- st_read(dsn = paste0(localPath,
                                "analysis/store/",
                                "NHDPlusV21_National_Seamless_Flattened_Lower48.gdb"),
                  layer = "NHDWaterbody") %>%
-  select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
+  dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
          GNIS_ID, GNIS_NAME, AREASQKM, 
          ELEVATION, REACHCODE, FTYPE, FCODE,
          ONOFFNET, PurpCode, PurpDesc,
@@ -93,13 +95,13 @@ dim(chesDat) # 4247 waterbodies in Chesepeake Bay simulations
 chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% nrow() # 25 waterbodies not in NHD
 
 chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% # nothing obviously wrong with values.
-  select(WB_ID) %>% print(n=Inf)
+  dplyr::select(WB_ID) %>% print(n=Inf)
 
 
 # merge datasets
 dat.sf <- merge(nhdSf, chesDat, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all chesDat observations
   mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
-  select(-COMID) %>% # remove residual COMID column
+  dplyr::select(-COMID) %>% # remove residual COMID column
   st_transform(5070) # Transform to Albers for making map of US
 
 dim(dat.sf) # 4247, good, kept all data
@@ -321,15 +323,15 @@ dat <- dat %>%
                               interval = "confidence")[,3] %>%
            pN2o(.)) # function to convert to mg n2o m-2 d-1
 
-dat[1:5,] %>% select(WB_ID, contains("n2o")) %>%
+dat[1:5,] %>% dplyr::select(WB_ID, contains("n2o")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile N2O emission rate (mg N2O m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat[1:5,] %>% select(WB_ID, contains("co2")) %>%
+dat[1:5,] %>% dplyr::select(WB_ID, contains("co2")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile CO2 emission rate (mg CO2 m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat[1:5,] %>% select(WB_ID, contains("ch4")) %>%
+dat[1:5,] %>% dplyr::select(WB_ID, contains("ch4")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile CH4 emission rate (mg CH4 m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
@@ -377,15 +379,15 @@ dat <- dat %>% mutate(
   n2oTMDLnew.lk.d.upr = n2oTMDLnew.upr * 1000000 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O d-1
 
 
-dat[1:5, ] %>% select(WB_ID, matches("n2o.*lk.d")) %>%
+dat[1:5, ] %>% dplyr::select(WB_ID, matches("n2o.*lk.d")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily N2O emission (mg N2O day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat[1:5, ] %>% select(WB_ID, matches("co2.*lk.d")) %>%
+dat[1:5, ] %>% dplyr::select(WB_ID, matches("co2.*lk.d")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily CO2 emission (mg CO2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat[1:5, ] %>% select(WB_ID, matches("ch4.*lk.d")) %>%
+dat[1:5, ] %>% dplyr::select(WB_ID, matches("ch4.*lk.d")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile daily CH4 emission (mg CH4 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
@@ -397,11 +399,10 @@ The models used to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) are b
 
 ```{r}
 dat <- dat %>%
-  select(WB_ID, contains("lk.d")) %>%
+  dplyr::select(WB_ID, contains("lk.d")) %>%
   mutate_at(vars(-WB_ID), function(x) x * (365 - 120)) %>% # 120 days of ice cover
   rename_at(vars(-WB_ID), function(x) gsub(".d", ".yr", x))
 ```
-
 
 
 ### Sum annual emissions across all waterbodies.
@@ -409,23 +410,23 @@ We can now sum the total annual emissions (metric tons of GHG) across all waterb
 
 ```{r}
 dat.sum <- dat %>% 
-  select(contains("lk.yr")) %>%
+  dplyr::select(contains("lk.yr")) %>%
  summarize_all(sum, na.rm = TRUE) %>%
   mutate_all(~. / (1000*1000*1000)) %>% # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg)
   rename_all(function(x) paste0(x, ".sum")) %>%
   rename_all(function(x) gsub("lk.", "", x))
 
-dat.sum %>% select(matches("n2o.*.yr")) %>%
+dat.sum %>% dplyr::select(matches("n2o.*.yr")) %>%
   mutate_all(round, digits = 0) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual N2O emission (metric tons N2O day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat.sum %>% select(matches("co2.*.yr")) %>%
+dat.sum %>% dplyr::select(matches("co2.*.yr")) %>%
   mutate_all(round, digits = 0) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual CO2 emission (metric tons CO2 day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
 
-dat.sum %>% select(matches("ch4.*.yr")) %>%
+dat.sum %>% dplyr::select(matches("ch4.*.yr")) %>%
   mutate_all(round, digits = 0) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile aggregate annual CH4 emission (metric tons CH4 day-1) for all waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
@@ -457,7 +458,7 @@ dat.sum <- dat.sum %>%
 
 
 dat.sum %>% 
-  select(ch4incr.yr, ch4incr.yr.upr, ch4incr.yr.lwr, co2incr.yr, co2incr.yr.upr, 
+  dplyr::select(ch4incr.yr, ch4incr.yr.upr, ch4incr.yr.lwr, co2incr.yr, co2incr.yr.upr, 
          co2incr.yr.lwr, n2oincr.yr, n2oincr.yr.upr, n2oincr.yr.lwr) %>%
   mutate_at(vars(!contains("n2o", ignore.case = TRUE)), function(x) round(x, 0)) %>%
   mutate_at(vars(contains("n2o", ignore.case = TRUE)), function(x) round(x, 1))  %>%
@@ -478,11 +479,11 @@ An alternative approach to estimating uncertainty is to bootstrap a sample from 
 # 
 ghg <- list() # empty list to hold results
 # time.i <- print(Sys.time())
-for(i in 1:100) { # 4 minutes
+for(i in 1:10000) { # 4 minutes
   #print(i) # print status update
   tmpData <- dat[sample(1:nrow(dat), replace = TRUE), ] # bootstrap piece: sample with replacement
   ghg[[i]] <- tmpData %>% # assign object to element i of list
-    select("WB_ID", !contains("yr.")) # exclude the upper and lower confidence estimates
+    dplyr::select("WB_ID", !contains("yr.")) # exclude the upper and lower confidence estimates
 }
 # time.i; print(Sys.time())
 
@@ -512,6 +513,221 @@ simIncrGhg %>%
   mutate_at(vars(contains("n2o", ignore.case = TRUE)), function(x) round(x, 1)) %>%
   kbl(col.names = rep(c("mean", "upper 97.5", "lower 2.5"), 3),
       caption = "Incremental GHG (metric tons) calculated from bootstrapping.") %>%
+   add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+```
+
+### Incremental change and uncertainty in model predictions using simulation (Krinsky and Robb, 1986)
+
+An alternative approach to estimating uncertainty is to exploit the uncertainty in the model by randomly sampling from the distribution of the model coefficients using their covariance matrix to accommodate correlation within draws. We iterate this with 10,000 random draws.
+
+<!-- Krinsky, I and A. L. Robb. 1986. “On Approximating the Statistical Properties of Elasticities.” Review of -->
+<!-- Economic and Statistics 68: 715-719. -->
+
+```{r results='hide', message=FALSE, warning=FALSE}
+
+dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
+lakes <- dat %>% dplyr::select(WB_ID,AREASQKM)
+
+#####################################
+################################  CH4
+#####################################
+
+## 2010 Data
+dat_2010 <-  dat %>%
+  dplyr::select(Chla2010) %>%
+  mutate('(Intercept)'=1,
+         Chla2010 = log10(Chla2010 * 1000)) %>%
+  rename('log10(Chlorophyll.a..ug.L.)'=Chla2010) %>%
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  dat %>%
+  dplyr::select(ChlaTMDLnew) %>%
+  mutate('(Intercept)'=1,
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>%
+  rename('log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+
+####  PREDICTIONS
+
+set.seed(42)
+diff_ch4 <- replicate(10000, {
+  
+## Distribution of coefficients 
+coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
+
+## Predictions based on model uncertainty
+preds_2010_lakes <- cbind(lakes,
+                          dat_2010 %*% coefs)
+preds_tmdl_lakes <- cbind(lakes,
+                          dat_tmdl %*% coefs)
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes[,3])) # transform according to functions above
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes[,3])) # transform according to functions above
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+
+## Convert and take difference in predictions and sum across all lakes
+sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
+
+## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
+## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
+})
+summary(diff_ch4)
+
+#####################################
+################################  CO2
+#####################################
+
+#### PARTS 
+
+## 2010 Data
+dat_2010 <-  dat %>%
+  dplyr::select(Pin2010,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         TP..ug.L. = log10(Pin2010 * 1000),
+         'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
+  dplyr::select(-Pin2010) %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  dat %>%
+  dplyr::select(PinTMDLnew,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         TP..ug.L. = log10(PinTMDLnew * 1000),
+         'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
+  dplyr::select(-PinTMDLnew) %>%
+  as.matrix()
+
+
+####  PREDICTIONS
+
+set.seed(42)
+diff_co2 <- replicate(10000, {
+  
+## Distribution of coefficients 
+coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
+
+## Predictions based on model uncertainty
+preds_2010_lakes <- cbind(lakes,
+                          dat_2010 %*% coefs)
+preds_tmdl_lakes <- cbind(lakes,
+                          dat_tmdl %*% coefs)
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes[,3])) # transform according to functions above
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes[,3])) # transform according to functions above
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+
+## Convert and take difference in predictions and sum across all lakes
+sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
+
+## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
+## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
+})
+summary(diff_co2)
+
+#####################################
+################################  N20
+#####################################
+
+#### PARTS 
+
+## 2010 Data
+dat_2010 <-  dat %>%
+  dplyr::select(Chla2010,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         Chla2010 = log10(Chla2010 * 1000)) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=Chla2010) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  dat %>%
+  dplyr::select(ChlaTMDLnew,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+
+####  PREDICTIONS
+
+set.seed(42)
+diff_n2o <- replicate(10000, {
+  
+## Distribution of coefficients 
+coefs = MASS::mvrnorm(1, mu = coef(mod.n2o), Sigma = vcov(mod.n2o))
+
+## Predictions based on model uncertainty
+preds_2010_lakes <- cbind(lakes,
+                          dat_2010 %*% coefs)
+preds_tmdl_lakes <- cbind(lakes,
+                          dat_tmdl %*% coefs)
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes[,3]),) # transform according to functions above
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes[,3])) # transform according to functions above
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+
+## Convert and take difference in predictions and sum across all lakes
+sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
+
+## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
+## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
+})
+summary(diff_n2o)
+```
+
+```{r}
+kr_simulations <- data.frame(mean_ch4 = round(mean(diff_ch4),0),
+                             uppr_ch4 = round(quantile(diff_ch4,.95),0),
+                             lowr_ch4 = round(quantile(diff_ch4,.05),0),
+                             mean_co2 = round(mean(diff_co2),0),
+                             uppr_co2 = round(quantile(diff_co2,.95),0),
+                             lowr_co2 = round(quantile(diff_co2,.05),0),
+                             mean_n2o = round(mean(diff_n2o),1),
+                             uppr_n2o = round(quantile(diff_n2o,.95),1),
+                             lowr_n2o = round(quantile(diff_n2o,.05),1))
+rownames(kr_simulations) <- c()
+  
+kr_simulations %>%
+  kbl(col.names = rep(c("mean", "upper 95", "lower 5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from simulation (Krinsky and Robb, 1986)") %>%
    add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
   kable_classic()
 ```
