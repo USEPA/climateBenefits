@@ -2,3 +2,8 @@ maps/milstead_lakes.html
 maps/chesData_and_NHD.html
 
 store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb/
+.Rproj.user
+*.Rproj.user/
+
+.Rproj.user/shared/notebooks/paths
+.Rproj.user/7E0366CD/sources/prop/INDEX

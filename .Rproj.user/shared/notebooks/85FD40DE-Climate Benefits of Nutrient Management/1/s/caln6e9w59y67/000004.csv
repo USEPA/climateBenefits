@@ -1,9 +1,0 @@
-"0","chesDat <- read_excel(paste0(localPath, 
-                             ""/Environmental Protection Agency (EPA)/"",
-                             ""Moore, Chris - Climate benefits of nutrient management/"",
-                             ""Lakes Modeling/ChesLakeLoadsConc.xlsx""),
-                      sheet = ""ChesLakeConc"")
-"
-"2","Error in read_excel(paste0(localPath, ""/Environmental Protection Agency (EPA)/"",  : 
-  could not find function ""read_excel""
-"

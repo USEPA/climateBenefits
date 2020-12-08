@@ -28,7 +28,7 @@ library(MASS)
 library(magrittr)
 
 # Define local path for each user.  Will enable reading data from 
-# 'Climate benefits of mutrient management' OneDrive folder maintained by Chris Moore
+# 'Climate benefits of nutrient management' OneDrive folder maintained by Chris Moore
 localPath <- Sys.getenv("USERPROFILE")
 
 # Print R session info
@@ -78,7 +78,7 @@ Each waterbody in the lake model output is uniquely identified by a 'WB_ID' valu
 nhdSf <- st_read(dsn = paste0(localPath, 
                                "/Environmental Protection Agency (EPA)/",
                                "Moore, Chris - Climate benefits of nutrient management/",
-                               "analysis/store/",
+                               "old/analysis/store/",
                                "NHDPlusV21_National_Seamless_Flattened_Lower48.gdb"),
                  layer = "NHDWaterbody") %>%
   dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
@@ -141,7 +141,7 @@ DelSontro et al. (2018) present linear regression models based on literature rep
 mod.ch4 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
                        "/Environmental Protection Agency (EPA)/",
                        "Moore, Chris - Climate benefits of nutrient management/",
-                       "analysis/climateBenefits_jb/models/pCh4.rds"))
+                       "ghgModels/pCh4.rds"))
 
 summary(mod.ch4) # review model
 
@@ -149,7 +149,7 @@ summary(mod.ch4) # review model
 mod.co2 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
                        "/Environmental Protection Agency (EPA)/",
                        "Moore, Chris - Climate benefits of nutrient management/",
-                       "analysis/climateBenefits_jb/models/pCo2.rds"))
+                       "ghgModels/pCo2.rds"))
 
 summary(mod.co2) # review model
 
@@ -158,7 +158,7 @@ summary(mod.co2) # review model
 mod.n2o <- readRDS(paste0(Sys.getenv("USERPROFILE"),
                        "/Environmental Protection Agency (EPA)/",
                        "Moore, Chris - Climate benefits of nutrient management/",
-                       "analysis/climateBenefits_jb/models/pn2o.rds"))
+                       "ghgModels/pn2o.rds"))
 
 summary(mod.n2o) # review model
 ```
@@ -470,13 +470,12 @@ dat.sum %>%
 
 ### Incremental change and uncertainty with bootstrapping
 
-An alternative approach to estimating uncertainty is to bootstrap a sample from the `r chesDat %>% nrow()` waterbodies in the data.  This approach assumes the statistical predictions are correct, then simulates sampling error by bootstrapping across the sample.  As shown below, this generates much narrower confidence intervals than the approach utilizing the statistical prediction error.
+An alternative approach to estimating uncertainty is to bootstrap a sample from the `r chesDat %>% nrow()` waterbodies in the data.  This approach assumes the statistical predictions are correct, then simulates sampling error by bootstrapping across the sample.  As shown below, this generates much narrower confidence intervals than the approach utilizing the statistical prediction error.  This probably isn't the appropriate approach because we have a census of lake (e.g. perfect knowledge of the population) rather than a sample.
 
 ```{r}
 # CALCULATE GHG EMISSIONS, AND INCREMENTAL CHANGES FOR GHG, CHLA, AND P-------------------
-# 33 minutes in got 'Error: cannot allocate vector of size 33 kb'
 
-# 
+ 
 ghg <- list() # empty list to hold results
 # time.i <- print(Sys.time())
 for(i in 1:10000) { # 4 minutes
@@ -536,9 +535,9 @@ lakes <- dat %>% dplyr::select(WB_ID,AREASQKM)
 ## 2010 Data
 dat_2010 <-  dat %>%
   dplyr::select(Chla2010) %>%
-  mutate('(Intercept)'=1,
-         Chla2010 = log10(Chla2010 * 1000)) %>%
-  rename('log10(Chlorophyll.a..ug.L.)'=Chla2010) %>%
+  mutate('(Intercept)'=1, # match names in model
+         Chla2010 = log10(Chla2010 * 1000)) %>% # mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)'=Chla2010) %>% # match names in model
   relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
   as.matrix()
 
@@ -546,7 +545,7 @@ dat_2010 <-  dat %>%
 dat_tmdl <-  dat %>%
   dplyr::select(ChlaTMDLnew) %>%
   mutate('(Intercept)'=1,
-         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>%
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>% # mg/L chl to ug/L
   rename('log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
   relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
   as.matrix()
@@ -562,27 +561,26 @@ coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
 
 ## Predictions based on model uncertainty
 preds_2010_lakes <- cbind(lakes,
-                          dat_2010 %*% coefs)
+                          dat_2010 %*% coefs) # this produces emission rate as log10(CH4-C + offset)
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes[,3])) # transform according to functions above
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes[,3])) # transform according to functions above
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes[,3])) # transform according to functions above -> mg CH4 m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes[,3])) # transform according to functions above -> mg CH4 m-2 day-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CH4 year-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CH4 year-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
 
 ## Convert and take difference in predictions and sum across all lakes
 sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
 
 ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
-## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
 })
 summary(diff_ch4)
 
@@ -597,7 +595,7 @@ dat_2010 <-  dat %>%
   dplyr::select(Pin2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
-         TP..ug.L. = log10(Pin2010 * 1000),
+         TP..ug.L. = log10(Pin2010 * 1000), #mg/L -> ug/L
          'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
   rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
   relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
@@ -631,14 +629,14 @@ preds_2010_lakes <- cbind(lakes,
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes[,3])) # transform according to functions above
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes[,3])) # transform according to functions above
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes[,3])) # transform according to functions above. mg CO2 m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes[,3])) # transform according to functions above. mg CO2 m-2 day-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CO2 year-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CO2 year-1
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
@@ -647,7 +645,6 @@ preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*10
 sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
 
 ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
-## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
 })
 summary(diff_co2)
 
@@ -662,7 +659,7 @@ dat_2010 <-  dat %>%
   dplyr::select(Chla2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
-         Chla2010 = log10(Chla2010 * 1000)) %>%
+         Chla2010 = log10(Chla2010 * 1000)) %>% # mg L-1 -> ug L-1
   rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=Chla2010) %>%
   relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
   as.matrix()
@@ -672,7 +669,7 @@ dat_tmdl <-  dat %>%
   dplyr::select(ChlaTMDLnew,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
-         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>%
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>% # mg L-1 -> ug L-1
   rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
   relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
   as.matrix()
@@ -692,14 +689,14 @@ preds_2010_lakes <- cbind(lakes,
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes[,3]),) # transform according to functions above
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes[,3])) # transform according to functions above
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes[,3]),) # transform according to functions above. mg N2O m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes[,3])) # transform according to functions above. mg N2O m-2 day-1
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover
+preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg N2O year-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg N2O year-1
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
@@ -708,7 +705,6 @@ preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*10
 sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
 
 ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
-## JAKE, PLEASE FIX MY CRUDE TRANSFORMATIONS HERE, LEFT LIKE THIS SO YOU CAN SEE WHAT IS HAPPENING, BUT I'M PROBABLY WRONG...
 })
 summary(diff_n2o)
 ```
