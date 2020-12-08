@@ -35,6 +35,7 @@
 %   upper_co2: upper 2.5th percentile of total incremental co2 emissions
 %   upper_n2o: upper 2.5th percentile of total incremental n2o emissions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+clear all; clc
 load('confint_data.mat')
 
 % Simulation Parameters 

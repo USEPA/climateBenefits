@@ -15,8 +15,6 @@
   tp_base    = data(:,4);
   tp_tmdl    = data(:,5); 
   size       = data(:,6);
-  sizextp_base = size.*tp_base;
-  sizextp_tmdl = size.*tp_tmdl;
   
  save('confint_data')
   

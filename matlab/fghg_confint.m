@@ -25,7 +25,7 @@ function [ mean_emissions,lower_bound,upper_bound ] = fghg_confint( b_mean,b_cov
 % Generate distribution of emission rates from each lake - NxS matrix for each scenario
   emissionrate1_dist = (10.^(X1*b_dist') - offset)*gasratio;     % RECOVERING LEVEL VALUES FROM LOG10 TRANSFORMED DATA
   emissionrate2_dist = (10.^(X2*b_dist') - offset)*gasratio;     % OFFSET: SCALAR USED TO AVOID LOGGING NEGATIVE VALUES IN ESTIMATION
-  
+  mean(emissionrate1_dist(1,:))
 % Convert rates to total emissions in tonnes
   size = size*ones(1,S); 
   lake_emissions1_dist = emissionrate1_dist.*(size.*10^6)*10^-9; 
