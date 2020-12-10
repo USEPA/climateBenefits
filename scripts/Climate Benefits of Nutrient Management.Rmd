@@ -16,7 +16,7 @@ editor_options:
 ---
 
 # Setup R
-```{r results='hide', message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE}
 # R 3.6.1 
 library(tidyverse) # dplyr, ggplot2,...
 library(scales)
@@ -61,9 +61,9 @@ chesDat <- read_excel(paste0(localPath,
 
 ```
 
-The model includes `r chesDat %>% nrow()` waterbodies.  Modeled chl and TP concentrations under the 2010 scenario average `r chesDat %>% summarize(meanChl = mean(Chla2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^ and `r chesDat %>% summarize(meanChl = mean(Pin2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^, respectively, which are reasonable environmental values.  The model predicts that lake chl and TP will be reduced by `r chesDat %>% mutate(chlReduction = ((Chla2010 - ChlaTMDLnew) / Chla2010) * 100) %>% summarize(percentRed = mean(chlReduction, na.rm = TRUE)) %>% pull() %>% round(1)`% and `r chesDat %>% mutate(tpReduction = ((Pin2010 - PinTMDLnew) / Pin2010) * 100) %>% summarize(percentRed = mean(tpReduction, na.rm = TRUE)) %>% pull() %>% round(1)`%, respectively, under the TMDLnew scenario. 
+The model includes `r chesDat %>% nrow()` waterbodies.  Modeled chl and TP concentrations under the 2010 scenario average `r chesDat %>% summarize(meanChl = mean(Chla2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^ and `r chesDat %>% summarize(meanChl = mean(Pvv2010, na.rm = TRUE)*1000) %>% pull() %>% round(1)` ug L^-1^, respectively, which are reasonable environmental values.  The model predicts that lake chl and TP will be reduced by `r chesDat %>% mutate(chlReduction = ((Chla2010 - ChlaTMDLnew) / Chla2010) * 100) %>% summarize(percentRed = mean(chlReduction, na.rm = TRUE)) %>% pull() %>% round(1)`% and `r chesDat %>% mutate(tpReduction = ((Pvv2010 - PvvTMDLnew) / Pvv2010) * 100) %>% summarize(percentRed = mean(tpReduction, na.rm = TRUE)) %>% pull() %>% round(1)`%, respectively, under the TMDLnew scenario. 
 ```{r }
-chl.p.summary <- do.call(cbind, lapply(chesDat %>% dplyr::select(Chla2010, Pin2010) %>% 
+chl.p.summary <- do.call(cbind, lapply(chesDat %>% dplyr::select(Chla2010, Pvv2010) %>% 
                                          mutate_all(~.*1000), summary)) %>% # *1000 mg/L to ug/L
   as.data.frame() %>%
   rownames_to_column(var = 'statistic') %>% 
@@ -189,6 +189,79 @@ pN2o <- function(x) { # x is output from above model which predicts log10(N2O-N)
 }
 ```
 
+## Inverse hyperbolic sine transformation
+Bryan Parthum suggested using the inverse hyperbolic sine (IHS) transformation rather than log + positive offset. Under some conditions, the IHS transformation can lead to more accurate elasticity estimates than the log + positive offset transformation (Bellamare and Wichman 2020).  Here we use the data and CH~4~ model structure from DelSontro et al, but apply the IHS transformation rather than the log + positive offset.  Both models identify chlorophyll as a highly significant predictor and have similar coefficient of determination values.
+
+```{r}
+# Define transformation
+ihs <- function(x) {
+  y <- log(x + sqrt(x ^ 2 + 1))
+  return(y)
+}
+
+# Inverse of IHS transformation
+hs <- function(x) {
+  y <- 0.5*exp(-x)*(exp(2*x)-1)
+  return(y)
+}
+
+# load data for DelSontro et al CH4 model
+allFlux <- read.table(paste0(Sys.getenv("USERPROFILE"),
+                             "/Environmental Protection Agency (EPA)/",
+                             "Moore, Chris - Climate benefits of nutrient management/",
+                             "old/analysis/store/allFlux.txt"), 
+                      header = TRUE, as.is = TRUE)
+
+# new model with ihs transformation
+mod.ch4.ihs <- lm(ihs(mg.CH4.C.m.2.d.1.Diffusive...Ebullitive) ~ ihs(Chlorophyll.a..ug.L.),
+                    data = allFlux)
+
+# compare models
+summary(mod.ch4) # DelSontro model
+summary(mod.ch4.ihs) # ihs model
+```
+
+Residuals from both models are approximately normally distributed and homoscedastic.
+```{r}
+ihs.log <- tibble(resid = c(resid(mod.ch4.ihs), resid(mod.ch4)), # model residuals
+                  chl = c(mod.ch4.ihs$model$'ihs(Chlorophyll.a..ug.L.)', # ihs transformed chl
+                          mod.ch4$model$`log10(Chlorophyll.a..ug.L.)`), # log transformed chl
+                  model = c(rep("ihs", length(resid(mod.ch4.ihs))), # labels
+                            rep("log", length(resid(mod.ch4))))) # labels
+
+# homoscedasticity
+ggplot(ihs.log, aes(chl, resid)) + 
+  geom_point() + 
+  facet_wrap(~model, scales = "free")
+       
+# normality
+ggplot(ihs.log, aes(x = resid)) +
+  geom_density() +
+  facet_wrap(~model, scales = "free")
+```
+
+When back transformed to linear space, the model predictions are very similar up to approximately 150 mg CH4-C m-2 day-1.  Beyond that threshold, the ihs model predicts higher emission rates than the log-log model.
+
+```{r}
+# compare predictions
+preds <- tibble(log.preds = predict(mod.ch4, 
+                                    newdata = list(Chlorophyll.a..ug.L. = 1:100)), #75th percentile of ches chl is 36.6
+                ihs.preds = predict(mod.ch4.ihs, 
+                                    newdata = list(Chlorophyll.a..ug.L. = 1:100))) %>%#75th percentile of ches chl is 36.6
+  mutate(log.preds = 10^(log.preds) - 1,
+         ihs.preds = hs(ihs.preds))
+
+ggplot(preds, aes(log.preds, ihs.preds)) +
+  geom_point() + 
+  geom_abline(slope = 1, intercept = 0) +
+  xlab("CH4 emission rate (mg CH4-C m-2 day-1)\n predicted from log-log model") +
+  ylab("CH4 emission rate (mg CH4-C m-2 day-1)\n predicted from ihs model") +
+  ggtitle("Predictions from log-log model and ihs model")
+
+
+
+```
+
 ## GHG Emissions and Uncertainty Estimates
 
 We use the DelSontro et al. (2018) models to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) for each waterbody under the 2010 and TMDLnew scenarios.  Uncertainty was estimated using two approaches.  
@@ -200,7 +273,7 @@ In the first approach, we calculate the 95% confidence interval of the model pre
     
 dat <- dat %>% 
   mutate(ChlaDiff = Chla2010 - ChlaTMDLnew , # policy effect on chla
-         PinDiff = Pin2010 - PinTMDLnew,  # policy effect on P
+         PvvDiff = Pvv2010 - PvvTMDLnew,  # policy effect on P
          
          # CH4
          # 2010 emissions
@@ -244,19 +317,19 @@ dat <- dat %>%
          co22010 = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 43)
                            # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$Pvv2010 * 1000),  # *1000 because Pvv2010 is mg/l.
                            interval = "confidence")[,1] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1
          co22010.lwr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
                            # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$Pvv2010 * 1000),  # *1000 because Pvv2010 is mg/l.
                            interval = "confidence")[,2] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1         
          co22010.upr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
                          # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$Pin2010 * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$Pvv2010 * 1000),  # *1000 because Pvv2010 is mg/l.
                            interval = "confidence")[,3] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1
       
@@ -265,19 +338,19 @@ dat <- dat %>%
          co2TMDLnew = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
                              # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$PvvTMDLnew * 1000),  # *1000 because Pvv2010 is mg/l.
                               interval = "confidence")[,1] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1
          co2TMDLnew.lwr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
                              # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$PvvTMDLnew * 1000),  # *1000 because Pvv2010 is mg/l.
                               interval = "confidence")[,2] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1
          co2TMDLnew.upr = predict(mod.co2, # kettlebell model.  predicts log10(mgco2-c m-2 d-1 + 1)
                              # model expects Surface.Area..km2. and TP..ug.L., must tell it which data to use
                            newdata = list(Surface.Area..km2. = .$AREASQKM,
-                                          TP..ug.L. = .$PinTMDLnew * 1000),  # *1000 because Pin2010 is mg/l.
+                                          TP..ug.L. = .$PvvTMDLnew * 1000),  # *1000 because Pvv2010 is mg/l.
                               interval = "confidence")[,3] %>%
            pCo2(.), # function to convert to mg co2 m-2 d-1
          
@@ -592,26 +665,26 @@ summary(diff_ch4)
 
 ## 2010 Data
 dat_2010 <-  dat %>%
-  dplyr::select(Pin2010,AREASQKM) %>%
+  dplyr::select(Pvv2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
-         TP..ug.L. = log10(Pin2010 * 1000), #mg/L -> ug/L
+         TP..ug.L. = log10(Pvv2010 * 1000), #mg/L -> ug/L
          'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
   rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
   relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
-  dplyr::select(-Pin2010) %>%
+  dplyr::select(-Pvv2010) %>%
   as.matrix()
 
 ## TMDL Data
 dat_tmdl <-  dat %>%
-  dplyr::select(PinTMDLnew,AREASQKM) %>%
+  dplyr::select(PvvTMDLnew,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
-         TP..ug.L. = log10(PinTMDLnew * 1000),
+         TP..ug.L. = log10(PvvTMDLnew * 1000),
          'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
   rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
   relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
-  dplyr::select(-PinTMDLnew) %>%
+  dplyr::select(-PvvTMDLnew) %>%
   as.matrix()
 
 
