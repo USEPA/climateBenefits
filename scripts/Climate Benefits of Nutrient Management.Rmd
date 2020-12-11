@@ -29,7 +29,15 @@ library(magrittr)
 
 # Define local path for each user.  Will enable reading data from 
 # 'Climate benefits of nutrient management' OneDrive folder maintained by Chris Moore
-localPath <- Sys.getenv("USERPROFILE")
+# 12/11/2020 moved all data into repo; no longer reading files out
+# localPath <- Sys.getenv("USERPROFILE")
+
+# This sets knitr wd to that of the Rstudio project.
+knitr::opts_knit$set(
+     # This should allow Rmarkdown to locate the data
+     root.dir = rprojroot::find_rstudio_root_file()
+)
+
 
 # Print R session info
 print(sessionInfo())
@@ -53,10 +61,7 @@ Retired EPA researcher Bryan Milstead used the 'Northeast Lakes' model to estima
 The modeled chl and nutrient concentrations are reported in ChesLakeLoadsConc.xlsx.
 
 ```{r}
-chesDat <- read_excel(paste0(localPath, 
-                             "/Environmental Protection Agency (EPA)/",
-                             "Moore, Chris - Climate benefits of nutrient management/",
-                             "Lakes Modeling/ChesLakeLoadsConc.xlsx"),
+chesDat <- read_excel("store/ChesLakeLoadsConc.xlsx",
                       sheet = "ChesLakeConc")
 
 ```
@@ -75,11 +80,7 @@ Each waterbody in the lake model output is uniquely identified by a 'WB_ID' valu
 
 ``` {r results='hide', warning = FALSE, message = FALSE}
 # 50 seconds
-nhdSf <- st_read(dsn = paste0(localPath, 
-                               "/Environmental Protection Agency (EPA)/",
-                               "Moore, Chris - Climate benefits of nutrient management/",
-                               "old/analysis/store/",
-                               "NHDPlusV21_National_Seamless_Flattened_Lower48.gdb"),
+nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                  layer = "NHDWaterbody") %>%
   dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
          GNIS_ID, GNIS_NAME, AREASQKM, 
@@ -138,27 +139,18 @@ DelSontro et al. (2018) present linear regression models based on literature rep
 ```{r}
 # Total CH4 model.  mg CH4-C m-2 d-1
 # read from disk
-mod.ch4 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
-                       "/Environmental Protection Agency (EPA)/",
-                       "Moore, Chris - Climate benefits of nutrient management/",
-                       "ghgModels/pCh4.rds"))
+mod.ch4 <- readRDS("store/pCh4.rds")
 
 summary(mod.ch4) # review model
 
 # CO2 model.  mg CO2-C m-2 d-1
-mod.co2 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
-                       "/Environmental Protection Agency (EPA)/",
-                       "Moore, Chris - Climate benefits of nutrient management/",
-                       "ghgModels/pCo2.rds"))
+mod.co2 <- readRDS("store/pCo2.rds")
 
 summary(mod.co2) # review model
 
 
 # N2O model. mg N2O-n m-2 day-1
-mod.n2o <- readRDS(paste0(Sys.getenv("USERPROFILE"),
-                       "/Environmental Protection Agency (EPA)/",
-                       "Moore, Chris - Climate benefits of nutrient management/",
-                       "ghgModels/pn2o.rds"))
+mod.n2o <- readRDS("store/pn2o.rds")
 
 summary(mod.n2o) # review model
 ```
@@ -206,10 +198,7 @@ hs <- function(x) {
 }
 
 # load data for DelSontro et al CH4 model
-allFlux <- read.table(paste0(Sys.getenv("USERPROFILE"),
-                             "/Environmental Protection Agency (EPA)/",
-                             "Moore, Chris - Climate benefits of nutrient management/",
-                             "old/analysis/store/allFlux.txt"), 
+allFlux <- read.table("store/allFlux.txt", 
                       header = TRUE, as.is = TRUE)
 
 # new model with ihs transformation

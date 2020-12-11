@@ -12,7 +12,7 @@
 
 <meta name="author" content="J. Beaulieu, E. Kopits, C. Moore, B. Parthum" />
 
-<meta name="date" content="2020-12-10" />
+<meta name="date" content="2020-12-11" />
 
 <title>Climate Benefits of Nutrient Management</title>
 
@@ -3072,7 +3072,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">Climate Benefits of Nutrient Management</h1>
 <h4 class="author">J. Beaulieu, E. Kopits, C. Moore, B. Parthum</h4>
-<h4 class="date">2020-12-10</h4>
+<h4 class="date">2020-12-11</h4>
 
 </div>
 
@@ -3091,7 +3091,15 @@ library(magrittr)
 
 # Define local path for each user.  Will enable reading data from 
 # &#39;Climate benefits of nutrient management&#39; OneDrive folder maintained by Chris Moore
-localPath &lt;- Sys.getenv(&quot;USERPROFILE&quot;)
+# 12/11/2020 moved all data into repo; no longer reading files out
+# localPath &lt;- Sys.getenv(&quot;USERPROFILE&quot;)
+
+# This sets knitr wd to that of the Rstudio project.
+knitr::opts_knit$set(
+     # This should allow Rmarkdown to locate the data
+     root.dir = rprojroot::find_rstudio_root_file()
+)
+
 
 # Print R session info
 print(sessionInfo())</code></pre>
@@ -3131,12 +3139,12 @@ print(sessionInfo())</code></pre>
 ## [25] class_7.3-15       broom_0.5.2        Rcpp_1.0.3        
 ## [28] KernSmooth_2.23-15 backports_1.1.4    classInt_0.4-3    
 ## [31] webshot_0.5.1      jsonlite_1.6       hms_0.5.0         
-## [34] digest_0.6.20      stringi_1.4.3      grid_3.6.1        
-## [37] cli_1.1.0          tools_3.6.1        crayon_1.3.4      
-## [40] pkgconfig_2.0.2    xml2_1.2.2         lubridate_1.7.4   
-## [43] assertthat_0.2.1   rmarkdown_1.16.2   httr_1.4.1        
-## [46] rstudioapi_0.10    R6_2.4.0           units_0.6-3       
-## [49] nlme_3.1-140       compiler_3.6.1</code></pre>
+## [34] digest_0.6.20      stringi_1.4.3      rprojroot_1.3-2   
+## [37] grid_3.6.1         cli_1.1.0          tools_3.6.1       
+## [40] crayon_1.3.4       pkgconfig_2.0.2    xml2_1.2.2        
+## [43] lubridate_1.7.4    assertthat_0.2.1   rmarkdown_1.16.2  
+## [46] httr_1.4.1         rstudioapi_0.10    R6_2.4.0          
+## [49] units_0.6-3        nlme_3.1-140       compiler_3.6.1</code></pre>
 </div>
 <div id="background" class="section level1">
 <h1><span class="header-section-number">2</span> Background</h1>
@@ -3151,10 +3159,7 @@ print(sessionInfo())</code></pre>
 <p><strong>2010</strong> – represents an estimate of “current” load levels and uses estimated 2010 land uses, animal populations, atmospheric deposition, and point source loads (our “constant baseline” scenario for the SP study, probably a good candidate for our baseline).</p>
 <p><strong>TMDLnew</strong> - Based on the final WIPs approved by EPA and air deposition that would meet 2020 air quality standards.</p>
 <p>The modeled chl and nutrient concentrations are reported in ChesLakeLoadsConc.xlsx.</p>
-<pre class="r"><code>chesDat &lt;- read_excel(paste0(localPath, 
-                             &quot;/Environmental Protection Agency (EPA)/&quot;,
-                             &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                             &quot;Lakes Modeling/ChesLakeLoadsConc.xlsx&quot;),
+<pre class="r"><code>chesDat &lt;- read_excel(&quot;store/ChesLakeLoadsConc.xlsx&quot;,
                       sheet = &quot;ChesLakeConc&quot;)</code></pre>
 <p>The model includes 4247 waterbodies. Modeled chl and TP concentrations under the 2010 scenario average 33.4 ug L<sup>-1</sup> and 86.2 ug L<sup>-1</sup>, respectively, which are reasonable environmental values. The model predicts that lake chl and TP will be reduced by 21.1% and 21.6%, respectively, under the TMDLnew scenario.</p>
 <pre class="r"><code>chl.p.summary &lt;- do.call(cbind, lapply(chesDat %&gt;% dplyr::select(Chla2010, Pvv2010) %&gt;% 
@@ -3249,11 +3254,7 @@ Max.
 </table>
 <p>Each waterbody in the lake model output is uniquely identified by a ‘WB_ID’ value. These values correspond to ‘COMID’ values in the NHDPlusV2 dataset, a spatial database of U.S. waterbodies. Below we merge these data sets to combine the model output with other waterbody characteristics in NHDPlusV2, including waterbody surface areas.</p>
 <pre class="r"><code># 50 seconds
-nhdSf &lt;- st_read(dsn = paste0(localPath, 
-                               &quot;/Environmental Protection Agency (EPA)/&quot;,
-                               &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                               &quot;old/analysis/store/&quot;,
-                               &quot;NHDPlusV21_National_Seamless_Flattened_Lower48.gdb&quot;),
+nhdSf &lt;- st_read(dsn = &quot;store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb&quot;,
                  layer = &quot;NHDWaterbody&quot;) %&gt;%
   dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
          GNIS_ID, GNIS_NAME, AREASQKM, 
@@ -3311,10 +3312,7 @@ Location of 4,247 waterbodies in Chesapeake Bay model
 <p>DelSontro et al. (2018) present linear regression models based on literature reports of chl concentration (ug/L), TP concentration (ug/L) and areal GHG emission rates (mg CH<sub>4</sub>-C m<sup>-2</sup> day<sup>-1</sup>). The models were created on the log-log scale with a small positive offset to accommodate negative areal emission rates reported in the literature. Below we read in the model objects.</p>
 <pre class="r"><code># Total CH4 model.  mg CH4-C m-2 d-1
 # read from disk
-mod.ch4 &lt;- readRDS(paste0(Sys.getenv(&quot;USERPROFILE&quot;),
-                       &quot;/Environmental Protection Agency (EPA)/&quot;,
-                       &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                       &quot;ghgModels/pCh4.rds&quot;))
+mod.ch4 &lt;- readRDS(&quot;store/pCh4.rds&quot;)
 
 summary(mod.ch4) # review model</code></pre>
 <pre><code>## 
@@ -3338,10 +3336,7 @@ summary(mod.ch4) # review model</code></pre>
 ## Multiple R-squared:  0.3756, Adjusted R-squared:  0.3669 
 ## F-statistic:  43.3 on 1 and 72 DF,  p-value: 6.501e-09</code></pre>
 <pre class="r"><code># CO2 model.  mg CO2-C m-2 d-1
-mod.co2 &lt;- readRDS(paste0(Sys.getenv(&quot;USERPROFILE&quot;),
-                       &quot;/Environmental Protection Agency (EPA)/&quot;,
-                       &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                       &quot;ghgModels/pCo2.rds&quot;))
+mod.co2 &lt;- readRDS(&quot;store/pCo2.rds&quot;)
 
 summary(mod.co2) # review model</code></pre>
 <pre><code>## 
@@ -3372,10 +3367,7 @@ summary(mod.co2) # review model</code></pre>
 ## Multiple R-squared:  0.1141, Adjusted R-squared:  0.1137 
 ## F-statistic: 288.1 on 3 and 6712 DF,  p-value: &lt; 2.2e-16</code></pre>
 <pre class="r"><code># N2O model. mg N2O-n m-2 day-1
-mod.n2o &lt;- readRDS(paste0(Sys.getenv(&quot;USERPROFILE&quot;),
-                       &quot;/Environmental Protection Agency (EPA)/&quot;,
-                       &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                       &quot;ghgModels/pn2o.rds&quot;))
+mod.n2o &lt;- readRDS(&quot;store/pn2o.rds&quot;)
 
 summary(mod.n2o) # review model</code></pre>
 <pre><code>## 
@@ -3436,10 +3428,7 @@ hs &lt;- function(x) {
 }
 
 # load data for DelSontro et al CH4 model
-allFlux &lt;- read.table(paste0(Sys.getenv(&quot;USERPROFILE&quot;),
-                             &quot;/Environmental Protection Agency (EPA)/&quot;,
-                             &quot;Moore, Chris - Climate benefits of nutrient management/&quot;,
-                             &quot;old/analysis/store/allFlux.txt&quot;), 
+allFlux &lt;- read.table(&quot;store/allFlux.txt&quot;, 
                       header = TRUE, as.is = TRUE)
 
 # new model with ihs transformation
@@ -4986,19 +4975,19 @@ lower 2.5
 <tbody>
 <tr>
 <td style="text-align:right;">
-2085
+2088
 </td>
 <td style="text-align:right;">
-2416
+2417
 </td>
 <td style="text-align:right;">
-1787
+1797
 </td>
 <td style="text-align:right;">
-5259
+5257
 </td>
 <td style="text-align:right;">
-5491
+5480
 </td>
 <td style="text-align:right;">
 5037
@@ -5007,7 +4996,7 @@ lower 2.5
 3.5
 </td>
 <td style="text-align:right;">
-4
+4.1
 </td>
 <td style="text-align:right;">
 3
