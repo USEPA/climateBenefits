@@ -1,0 +1,613 @@
+---
+title: "Climate Benefits of Nutrient Management with Error"
+author: "Hayley Brittingham (Neptune and Company)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    fig_caption: yes
+    depth: 2
+    number_sections: true
+    code_folding:  hide
+editor_options: 
+  chunk_output_type: console
+---
+
+# Objective
+
+The objective is to propagate model uncertainty to obtain an estimate of total reduction in emissions of three gases (CH~4~, CO~2~, and N~2~O), and uncertainty around each estimate.
+
+```{r setup unit functions, message=FALSE, warning=FALSE}
+require(ggplot2)
+require(dplyr)
+require(sf)
+
+# little function to get CH4 in desired units
+pCh4 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CH4-C m-2 d-1)
+  mgCh4c <- 10^(x) - 1 # unlog, then subtract 1
+  mgCh4 <- mgCh4c * (16/12) # mg CH4-C -> mg CH4
+  return(mgCh4)
+}
+
+# little function to get CO2 in desired units
+pCo2 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CO2-C m-2 d-1)
+  mgCo2c <- 10^(x) - 43 # unlog, then subtract 43
+  mgCo2 <- mgCo2c * (44/12) # mg CO2-C -> mg CO2
+  return(mgCo2)
+}
+
+# little function to get N2O in desired units
+pN2o <- function(x) { # x is output from above model which predicts log10(N2O-N)  (mg N2O-N m-2 d-1)
+  mgN2on <- 10^(x) - 0.25 # unlog, then subtract 0.25
+  mgN2o <- mgN2on * (44/14) # mg N2O-N -> mg N2O
+  return(mgN2o)
+}
+
+# This sets knitr wd to that of the Rstudio project.
+knitr::opts_knit$set(
+     # This should allow Rmarkdown to locate the data
+     root.dir = rprojroot::find_rstudio_root_file()
+)
+```
+
+```{r load data, message=FALSE, warning=FALSE, results='hide'}
+#main dataset
+chesDat <- readxl::read_excel("store/ChesLakeLoadsConc.xlsx", sheet = "ChesLakeConc") 
+
+#spatial data - needed for surface area predictor.
+# 50 seconds
+nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
+                 layer = "NHDWaterbody") %>%
+  select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
+         GNIS_ID, GNIS_NAME, AREASQKM, 
+         ELEVATION, REACHCODE, FTYPE, FCODE,
+         ONOFFNET, PurpCode, PurpDesc,
+         MeanDepth, LakeVolume, MaxDepth, MeanDUsed, MeanDCode) # lakeMorpho data
+
+st_crs(nhdSf) # 4269, NAD83
+dim(nhdSf) # 448512 waterbodies
+dim(chesDat) # 4247 waterbodies in Chesepeake Bay simulations
+
+# we assume chesDat$WB_ID == nhdSf$COMID.  Are all WB_ID in NHD?
+chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% nrow() # 25 waterbodies not in NHD
+
+chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% # nothing obviously wrong with values.
+  select(WB_ID) %>% print(n=Inf)
+
+
+# merge datasets
+dat.sf <- merge(nhdSf, chesDat, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all chesDat observations
+  mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
+  select(-COMID) %>% # remove residual COMID column
+  st_transform(5070) # Transform to Albers for making map of US
+
+dim(dat.sf) # 4247, good, kept all data
+
+#  All WB_ID preserved from chesDat?
+sum(!(dat.sf$WB_ID %in% chesDat$WB_ID)) # all are present in chesDat
+sum(!(chesDat$WB_ID %in% dat.sf$WB_ID)) # all chesDat WB_ID in dat
+
+# how many missing AREASQKM?
+dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
+```
+
+## Models 
+
+```{r load in models}
+knitr::opts_chunk$set(echo = TRUE)
+
+#first load in all three models and the data
+
+# Total CH4 model.  mg CH4-C m-2 d-1
+# read from disk
+mod.ch4 <- readRDS("store/pCh4.rds") 
+
+summary(mod.ch4) # review model
+
+# # CO2 model.  mg CO2-C m-2 d-1
+mod.co2 <- readRDS("store/pCo2.rds")
+
+summary(mod.co2) # review model
+
+
+# # N2O model. mg N2O-n m-2 day-1
+mod.n2o <- readRDS("store/pN2o.rds") 
+
+summary(mod.n2o) # review model
+```
+
+# Evaluate Independence
+
+If there is a correlation between the 2010 and potential future emissions, this would affect the appropriate method for computing the difference in emissions via statistical simulation.
+
+The data in the example were generated independently as an example, but this is not necessarily the case in the real data in the Chesapeake watershed.
+
+Look at correlation between the two scenarios for both the predictors and the response.
+
+```{r independence, warning=FALSE, fig.height=7}
+
+#correlation between predictors
+chl_corr<-ggplot(chesDat, aes(x=Chla2010, y=ChlaTMDLnew)) +
+  geom_point() + theme_bw() +
+  scale_x_continuous(trans="log10") +
+  scale_y_continuous(trans="log10") #very tight correlation
+
+TP_corr<-ggplot(chesDat, aes(x=Pin2010, y=PinTMDLnew)) +
+  geom_point() + theme_bw() +
+  scale_x_continuous(trans="log10") +
+  scale_y_continuous(trans="log10") #very tight correlation
+gridExtra::grid.arrange(chl_corr, TP_corr)
+
+#use the model to predict emissions and look at that correlation (should be similar)
+dat.sf<-dat.sf %>%
+  dplyr::mutate(CH4_pred_2010 = predict(mod.ch4, 
+                                        newdata = list(Chlorophyll.a..ug.L. = Chla2010*1000)), #multiply by 1000 mg/l to ug/l
+                CH4_pred_TMDL = predict(mod.ch4, 
+                                        newdata = list(Chlorophyll.a..ug.L. = ChlaTMDLnew*1000)),
+                CH4_SE_2010 = predict(mod.ch4, 
+                                      newdata = list(Chlorophyll.a..ug.L. = Chla2010*1000), 
+                                  se.fit = T)$se.fit,
+                CH4_SE_TMDL = predict(mod.ch4, newdata = list(Chlorophyll.a..ug.L. = ChlaTMDLnew*1000),
+                                  se.fit = T)$se.fit,
+                #CO2 predictions and SE
+                CO2_pred_2010 = predict(mod.co2, 
+                                        newdata = list(TP..ug.L. = Pin2010*1000, 
+                                                       Surface.Area..km2. = AREASQKM)),
+                CO2_pred_TMDL = predict(mod.co2, 
+                                        newdata = list(TP..ug.L. = PinTMDLnew*1000,
+                                                       Surface.Area..km2. = AREASQKM)),
+                CO2_SE_2010 = predict(mod.co2, 
+                                      newdata = list(TP..ug.L. = Pin2010*1000,
+                                                     Surface.Area..km2. = AREASQKM), 
+                                  se.fit = T)$se.fit,
+                CO2_SE_TMDL = predict(mod.co2, 
+                                      newdata = list(TP..ug.L. = PinTMDLnew*1000,
+                                                     Surface.Area..km2. = AREASQKM),
+                                  se.fit = T)$se.fit,
+                #N2O predictions and SE
+                N2O_pred_2010 = predict(mod.n2o, 
+                                        newdata = list(Chlorophyll.a..ug.L. = Chla2010*1000, 
+                                                       Surface.Area..km2. = AREASQKM)),
+                N2O_pred_TMDL = predict(mod.n2o, 
+                                        newdata = list(Chlorophyll.a..ug.L. = ChlaTMDLnew*1000,
+                                                       Surface.Area..km2. = AREASQKM)),
+                N2O_SE_2010 = predict(mod.n2o, 
+                                      newdata = list(Chlorophyll.a..ug.L. = Chla2010*1000,
+                                                     Surface.Area..km2. = AREASQKM), 
+                                  se.fit = T)$se.fit,
+                N2O_SE_TMDL = predict(mod.n2o, 
+                                      newdata = list(Chlorophyll.a..ug.L. = ChlaTMDLnew*1000,
+                                                     Surface.Area..km2. = AREASQKM),
+                                  se.fit = T)$se.fit)
+
+pred_corr_CH4<-ggplot(dat.sf, aes(x=CH4_pred_2010, y=CH4_pred_TMDL)) +
+  geom_point() + theme_bw() #very similar
+#no need to log transform since we haven't back transformed yet (they already are)
+
+pred_corr_CO2<-ggplot(dat.sf, aes(x=CO2_pred_2010, y=CO2_pred_TMDL)) +
+  geom_point() + theme_bw() #very similar
+
+pred_corr_N2O<-ggplot(dat.sf, aes(x=N2O_pred_2010, y=N2O_pred_TMDL)) +
+  geom_point() + theme_bw() #very similar
+
+gridExtra::grid.arrange(pred_corr_CH4, pred_corr_CO2, pred_corr_N2O)
+```
+
+
+# Simulation Approach
+
+While the predictions follow normal distributions, due to the log-transformation, the variables of interest actually follow lognormal distributions. Unfortunately the distribution of the difference (or sum) of two lognormal randnm variables is not as straightforward and must be calculated using statistical simulation.
+
+The simulation approach is as follows:
+
+1) For each lake, take a pair of draws from a multivariate normal distribution using the standard errors of prediction and the covariance, which together make up the covariance matrix. 
+*** NOTE that here we are assuming that the covariance between scenarios is similar for all lakes. We are applying the covariance across lakes from the actual data to the covariance matrix for each individual lake.
+
+2) Perform the back-transformation (pCh4, pCo2, and pN2o functions)
+
+3) Take the difference of the two variables which represents the change in emmissions between 2010 and future hypothetical conditions for each lake
+
+4) Sum the differences in emissions across all lakes to obtain the total reduction in emissions. 
+
+5) Repeat steps 1-4 1,000 times to obtain a distribution of reasonable reduction in emissions. The standard deviation of the 1,000 estimates is the estimate for total uncertainty. 
+
+```{r simulation function}
+
+sim_cov<-function(dat=dat.sf, cov_emissions, mean_names, SE_names,
+                  var_sol="ignore", conv_fun) {
+  
+  #var_sol is the solution to the variance error. 
+  #MASS::mvrnorm throws an error if the covariance is too small relative to the variance
+  #so that the covariance matrix is not positive definite. 
+  #happens with a few lakes (<10 for CH4)
+  #options are to take the raw predictions (ignore) -- takes 15-20 min
+  #or to increase the covariance (adjust) -- takes ~20 mins
+  #testing this shows it makes little difference, so I use 'ignore'
+  
+  #first create a mean vector and covariance matrix for each lake 
+  means_df<-data.frame(dat[,which(names(dat) %in% mean_names)])
+  means<-lapply(1:nrow(means_df), function(i) {c(means_df[i,1], means_df[i,2])})
+  
+  SEs<-data.frame(dat[,which(names(dat) %in% SE_names)])
+   cov_mat<-lapply(1:nrow(SEs), function(i) {
+    matrix(c(cov_emissions, SEs[i,1]^2, SEs[i,2]^2, cov_emissions), nrow=2)})
+  
+  # #now take a pair of draws from a multivariate normal
+  # log_em<-lapply(1:nrow(SEs), function(i) {
+  #   MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]])
+  # }) #need to use tryCatch to get around matrix positive definite error
+  log_em<-list()
+  for (i in 1:length(means)) {
+    log_em[[i]]<-tryCatch(data.frame(t(MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]]))),
+                          error = function(err) {
+                            invisible(err)
+                            if (var_sol == "adjust") { #this option adds additional variance to avoid error
+                              
+                              #find optimal value to add to variance
+                              test<-try(MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]]),
+                                        silent=T)
+                              a = 0.01
+                              
+                              while (class(test)=="try-error") {
+                                mat <- cov_mat[[i]] + diag(ncol(cov_mat[[i]]))*a
+                                test <- try(MASS::mvrnorm(1, mu=means[[i]], Sigma = mat),
+                                            silent=T)
+                                a = a + 0.01
+                              }
+                              
+                              data.frame(t(MASS::mvrnorm(1, mu=means[[i]], Sigma = mat)))
+                              
+                            } else if (var_sol == "ignore") { #this option ignores model uncertainty in the lakes that throw an error
+                                
+                              data.frame(t(means[[i]]))
+                              
+                            } else {
+                                
+                              stop("err must be either 'adjust' to add variation until draw can be taken or 'ignore' to use the raw predictions")
+                                
+                              }
+                            })
+      names(log_em[[i]])<-c("2010","TMDL")
+  }
+  
+  log_em_df<-log_em %>%
+    do.call(rbind.data.frame, .) 
+
+  #back transform each
+  em_2010<-conv_fun(log_em_df$`2010`) * 1000000 * dat$AREASQKM #convert to mg / day
+  em_TMDL<-conv_fun(log_em_df$TMDL) * 1000000 * dat$AREASQKM #but some of these are NA...
+  
+  #get the difference for each lake
+  em_diff<-em_2010 - em_TMDL
+  
+  #return the total reduction across all lakes in metric tons
+  return(sum(em_diff, na.rm=T) / (1000*1000*1000))  # mg->g, g->kg, kg->Mg. 1 MG = 1
+  #units are metric tons per day
+}
+
+```
+
+## Reduction in CH~4~ Emissions
+
+```{r methane, cache=T}
+
+#use the covariance of emissions
+cov(dat.sf$CH4_pred_2010, dat.sf$CH4_pred_TMDL)
+
+#adding additional variation does not contribute much to the overall uncertainty, 
+#and this takes a while to run. 
+# simulated_total_reduction_cov_varadjust<-
+#   replicate(1000, sim_cov(mean_2010=dat.sf$CH4_pred_2010, se_2010=dat.sf$CH4_SE_2010,
+#                           mean_TMDL=dat.sf$CH4_pred_TMDL, se_TMDL=dat.sf$CH4_SE_TMDL,
+#                           cov_emissions=cov(dat.sf$CH4_pred_2010, dat.sf$CH4_pred_TMDL),
+#                           var_sol = "adjust", conv_fun=pCh4))
+# 
+# withCov_varAdjust<-ggplot(data.frame(x=simulated_total_reduction_cov_varadjust),
+#                        aes(x=x, y=..count../1000)) +
+#   geom_histogram() +
+#   labs(x="Total Reduction in Emissions", y="Density",
+#       title="Distribution for Total Reduction in Emissions for the Actual Dataset") + theme_bw()
+# withCov_varAdjust
+# 
+# mean(simulated_total_reduction_cov_varadjust) #mean
+# sd(simulated_total_reduction_cov_varadjust) #sd
+
+set.seed(0)
+simulated_total_reduction_CH4<-
+  replicate(10, sim_cov(mean_names=c("CH4_pred_2010","CH4_pred_TMDL"), 
+                          SE_names=c("CH4_SE_2010","CH4_SE_TMDL"),
+                          cov_emissions=cov(dat.sf$CH4_pred_2010, dat.sf$CH4_pred_TMDL),
+                          var_sol = "ignore", conv_fun=pCh4))
+
+withCov<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=simulated_total_reduction_CH4),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, C", H[4], " per day)")), 
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions") + theme_bw()
+withCov
+
+mean(simulated_total_reduction_CH4) #mean
+sd(simulated_total_reduction_CH4) #sd
+
+#test sensitivity of adjust or ignore
+# gridExtra::grid.arrange(withCov_varAdjust, withCov)
+#doesn't make a difference if we ignore model uncretainty in a few lakes
+
+#fit a distribution to these results
+withCov +   
+  stat_function(fun = "dnorm", 
+                args = list(mean = mean(simulated_total_reduction_CH4), 
+                            sd = sd(simulated_total_reduction_CH4)), 
+                size = 1.2, color="blue") 
+
+```
+
+Estimated total reduction in CH~4~ emissions `r round(mean(simulated_total_reduction_CH4), 1)` metric tons/day across 4,000 lakes with a standard deviation of `r round(sd(simulated_total_reduction_CH4), 2)`. 
+
+Due to the back-transformation, we are interested in the sum of the difference of two lognormal variables. While the sum of the difference of two normal variables is known to be a normally distributed variable, the distributional form of the difference (or the sum of the difference) of two lognormal variables is not known
+
+However, in this case, the estimated total reduction in CH~4~ emissions can be approximated by a normal distribution.
+
+## Reduction in  CO~2~ Emissions
+
+```{r CO2, cache=T}
+use_co2_dat<-dat.sf[which(!is.na(dat.sf$CO2_pred_2010) & !is.na(dat.sf$CO2_pred_TMDL)),]
+#removes the locations with NA surface area.
+
+#use the covariance of emissions
+cov(use_co2_dat$CO2_pred_2010, use_co2_dat$CO2_pred_TMDL)
+
+set.seed(0)
+simulated_total_reduction_CO2<-
+  replicate(10, sim_cov(mean_names=c("CO2_pred_2010","CO2_pred_TMDL"),
+                          SE_names=c("CO2_SE_2010","CO2_SE_TMDL"),
+                          dat = use_co2_dat,
+                          cov_emissions=cov(use_co2_dat$CO2_pred_2010, use_co2_dat$CO2_pred_TMDL),
+                          var_sol = "ignore", conv_fun=pCo2))
+
+withCov_CO2<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=simulated_total_reduction_CO2),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, C", O[2], " per day)")), 
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions") + 
+  theme_bw()
+withCov_CO2
+
+mean(simulated_total_reduction_CO2) #mean
+sd(simulated_total_reduction_CO2) #sd
+
+withCov_CO2 +   
+  stat_function(fun = "dnorm", 
+                args = list(mean = mean(simulated_total_reduction_CO2), 
+                            sd = sd(simulated_total_reduction_CO2)), 
+                size = 1.2, color="blue") 
+```
+
+Estimated total reduction in CO~2~ emissions ~`r round(mean(simulated_total_reduction_CO2), 1)` metric tons/day across 4,000 lakes with a standard deviation of ~`r round(sd(simulated_total_reduction_CO2), 2)`. 
+
+In this case, the estimated total reduction in CO~2~ emissions can be approximated by a normal distribution.
+
+## Reduction in  N~2~O Emissions
+
+```{r N2O, cache=T}
+use_n2o_dat<-dat.sf[which(!is.na(dat.sf$N2O_pred_2010) & !is.na(dat.sf$N2O_pred_TMDL)),]
+#removes the locations with NA surface area.
+
+#use the covariance of emissions
+cov(use_n2o_dat$N2O_pred_2010, use_n2o_dat$N2O_pred_TMDL)
+
+set.seed(0)
+simulated_total_reduction_N2O<-
+  replicate(10, sim_cov(mean_names=c("N2O_pred_2010","N2O_pred_TMDL"),
+                          SE_names=c("N2O_SE_2010","N2O_SE_TMDL"),
+                          cov_emissions=cov(use_n2o_dat$N2O_pred_2010, use_n2o_dat$N2O_pred_TMDL),
+                          var_sol = "ignore", conv_fun = pN2o, dat=use_n2o_dat))
+
+withCov_N2O<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=simulated_total_reduction_N2O),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, ", N[2], "O per day)")), 
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions") + theme_bw()
+withCov_N2O
+
+mean(simulated_total_reduction_N2O) #mean
+sd(simulated_total_reduction_N2O) #sd
+
+withCov_N2O +   
+  stat_function(fun = "dnorm", 
+                args = list(mean = mean(simulated_total_reduction_N2O), 
+                            sd = sd(simulated_total_reduction_N2O)), 
+                size = 1.2, color="blue") 
+```
+
+Estimated total reduction in N~2~O emissions ~`r round(mean(simulated_total_reduction_N2O), 3)` metric tons/day across 4,000 lakes with a standard deviation of ~`r round(sd(simulated_total_reduction_N2O), 3)`. 
+
+In this case, the estimated total reduction in N2O emissions can be approximated by a normal distribution.
+
+# Bootstrap Approach
+
+To incorporate sampling error, a bootstrap approach can be incorporated with the simulation, which accounts for model uncertainty. 
+
+Bootstrap sampling is incorporated by modifying the steps of the simulation:
+
+1) Sample n lakes with replacement, where n is equal to the total number of lakes in the dataset. For CO~2~ and N~2~O emissions, only lakes with non-NA surface areas are used. 
+
+*** The remaining steps are the same: 
+
+2) For each lake, take a pair of draws from a multivariate normal distribution using the standard errors of prediction and the covariance, which together make up the covariance matrix. 
+*** NOTE that here we are assuming that the covariance between scenarios is similar for all lakes. We are applying the covariance across lakes from the actual data to the covariance matrix for each individual lake.
+
+3) Perform the back-transformation (pCh4, pCo2, and pN2o functions)
+
+4) Take the difference of the two variables which represents the change in emissions between 2010 and future hypothetical conditions for each lake
+
+5) Sum the differences in emissions across all lakes to obtain the total reduction in emissions. 
+
+6) Repeat steps 1-4 1,000 times to obtain a distribution of reasonable reduction in emissions. The standard deviation of the 1,000 estimates is the estimate for total uncertainty. 
+
+
+```{r bootstrap}
+
+sim_cov_bootstrap<-function(dat, n=nrow(dat), mean_names, SE_names,
+                            var_sol="ignore", conv_fun) {
+  
+  #select n lakes with replacement
+  dat_sample<-dat[sample(1:nrow(dat), size=n, replace = T),]
+
+  # create a mean vector and covariance matrix for each lake 
+  means_df<-data.frame(dat_sample[,which(names(dat_sample) %in% mean_names)])
+  means<-lapply(1:nrow(means_df), function(i) {c(means_df[i,1], means_df[i,2])})
+  
+  cov_emissions<-cov(means_df[,1], means_df[,2])
+  
+  SEs<-data.frame(dat_sample[,which(names(dat_sample) %in% SE_names)])
+   cov_mat<-lapply(1:nrow(SEs), function(i) {
+    matrix(c(cov_emissions, SEs[i,1]^2, SEs[i,2]^2, cov_emissions), nrow=2)})
+  
+  #now take a pair of draws from a multivariate normal
+  # log_em<-lapply(1:nrow(SEs), function(i) {
+  #   MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]])
+  # }) #need to use tryCatch to get around matrix positive definite error
+  log_em<-list()
+  for (i in 1:length(means)) {
+    log_em[[i]]<-tryCatch(data.frame(t(MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]]))),
+                          error = function(err) {
+                            invisible(err)
+                            if (var_sol == "adjust") { #this option adds additional variance to avoid error
+                              
+                              #find optimal value to add to variance
+                              test<-try(MASS::mvrnorm(1, mu=means[[i]], Sigma = cov_mat[[i]]),
+                                        silent=T)
+                              a = 0.01
+                              
+                              while (class(test)=="try-error") {
+                                mat <- cov_mat[[i]] + diag(ncol(cov_mat[[i]]))*a
+                                test <- try(MASS::mvrnorm(1, mu=means[[i]], Sigma = mat),
+                                            silent=T)
+                                a = a + 0.01
+                              }
+                              
+                              data.frame(t(MASS::mvrnorm(1, mu=means[[i]], Sigma = mat)))
+                              
+                            } else if (var_sol == "ignore") { #this option ignores model uncertainty in the lakes that throw an error
+                                
+                              data.frame(t(means[[i]]))
+                              
+                            } else {
+                                
+                              stop("err must be either 'adjust' to add variation until draw can be taken or 'ignore' to use the raw predictions")
+                                
+                              }
+                            })
+      names(log_em[[i]])<-c("2010","TMDL")
+
+  }
+  
+  log_em_df<-log_em %>%
+    do.call(rbind.data.frame, .) 
+
+  #back transform each
+  em_2010<-conv_fun(log_em_df$`2010`) * 1000000 * dat_sample$AREASQKM #convert to mg / day
+  em_TMDL<-conv_fun(log_em_df$TMDL) * 1000000 * dat_sample$AREASQKM 
+  
+  #get the difference for each lake
+  em_diff<-em_2010 - em_TMDL
+  
+  #return the total reduction across all lakes in metric tons
+  return(sum(em_diff, na.rm=T) / (1000*1000*1000))  # mg->g, g->kg, kg->Mg
+  #units are metric tons per day
+}
+
+```
+
+## CH~4~ Emissions
+
+```{r CH4 boot, fig.height=9, cache=T}
+
+set.seed(0)
+total_reduction_CH4_withbootstrap<-
+  replicate(10, sim_cov_bootstrap(dat=dat.sf, n=nrow(dat.sf), 
+                                    mean_names=c("CH4_pred_2010", "CH4_pred_TMDL"), 
+                                    SE_names=c("CH4_SE_2010", "CH4_SE_TMDL"), 
+                                    var_sol="ignore", conv_fun=pCh4))
+
+withBoot_CH4<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=total_reduction_CH4_withbootstrap),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, C", H[4], " per day)")), 
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions - with Bootstrap") + 
+  theme_bw()
+# withBoot_CH4
+
+mean(total_reduction_CH4_withbootstrap) #mean
+sd(total_reduction_CH4_withbootstrap) #sd
+
+#compare to not accounting for sampling error
+gridExtra::grid.arrange(withCov, withBoot_CH4)
+
+```
+
+It appears that sampling uncertainty contributes very little to overall uncertainty. 
+
+## CO~2~ Emissions
+
+```{r CO2 boot, fig.height=9, cache=T}
+set.seed(0)
+total_reduction_CO2_withbootstrap<-
+  replicate(10, sim_cov_bootstrap(dat=use_co2_dat, n=nrow(use_co2_dat), 
+                                    mean_names=c("CO2_pred_2010", "CO2_pred_TMDL"), 
+                                    SE_names=c("CO2_SE_2010", "CO2_SE_TMDL"), 
+                                    var_sol="ignore", conv_fun=pCo2))
+
+withBoot_CO2<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=total_reduction_CO2_withbootstrap),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, C", O[2], " per day)")), 
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions - with Bootstrap") + 
+  theme_bw()
+# withBoot_CO2
+
+mean(total_reduction_CO2_withbootstrap) #mean
+sd(total_reduction_CO2_withbootstrap) #sd
+
+#compare to not accounting for sampling error
+gridExtra::grid.arrange(withCov_CO2, withBoot_CO2)
+```
+
+Again, it appears that sampling uncertainty contributes very little to overall uncertainty. 
+
+## N~2~O Emissions
+
+```{r N2O boot, fig.height=9, cache=T}
+set.seed(0)
+total_reduction_N2O_withbootstrap<-
+  replicate(10, sim_cov_bootstrap(dat=use_n2o_dat, n=nrow(use_n2o_dat), 
+                                    mean_names=c("N2O_pred_2010", "N2O_pred_TMDL"), 
+                                    SE_names=c("N2O_SE_2010", "N2O_SE_TMDL"), 
+                                    var_sol="ignore", conv_fun=pN2o))
+
+withBoot_N2O<-ggplot(data.frame(x=1:100)) +
+  geom_histogram(data=data.frame(x=total_reduction_N2O_withbootstrap),
+       aes(x=x, y=..density..)) + 
+  labs(x=expression(paste("Total Reduction in Emissions (metric tons, ", N[2], "O per day)")),
+       y="Density", 
+      title="Distribution for Total Reduction in Emissions - with Bootstrap") + 
+  theme_bw()
+# withBoot_N2O
+
+mean(total_reduction_N2O_withbootstrap) #mean
+sd(total_reduction_N2O_withbootstrap) #sd
+
+#compare to not accounting for sampling error
+gridExtra::grid.arrange(withCov_N2O, withBoot_N2O)
+```
+
+For N~2~O, adding in sampling uncertainty makes a bit more of a difference, perhaps because of the relatively low residual standard error (RSE) of the N~2~O model and the relatively smaller magnitude of emissions predictions.
+
