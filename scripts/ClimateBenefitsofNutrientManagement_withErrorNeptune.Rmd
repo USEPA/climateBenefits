@@ -44,27 +44,21 @@ pN2o <- function(x) { # x is output from above model which predicts log10(N2O-N)
   mgN2o <- mgN2on * (44/14) # mg N2O-N -> mg N2O
   return(mgN2o)
 }
+
+# This sets knitr wd to that of the Rstudio project.
+knitr::opts_knit$set(
+     # This should allow Rmarkdown to locate the data
+     root.dir = rprojroot::find_rstudio_root_file()
+)
 ```
 
 ```{r load data, message=FALSE, warning=FALSE, results='hide'}
-setwd(rprojroot::find_rstudio_root_file()) #force wd within a chunk
-
 #main dataset
-# chesDat <- read_excel(paste0(localPath, 
-#                              "/Environmental Protection Agency (EPA)/",
-#                              "Moore, Chris - Climate benefits of nutrient management/",
-#                              "Lakes Modeling/ChesLakeLoadsConc.xlsx"),
-#                       sheet = "ChesLakeConc")
-chesDat <- readxl::read_excel("../store/ChesLakeLoadsConc.xlsx", sheet = "ChesLakeConc") #hayley's path
+chesDat <- readxl::read_excel("store/ChesLakeLoadsConc.xlsx", sheet = "ChesLakeConc") 
 
 #spatial data - needed for surface area predictor.
 # 50 seconds
-# dsn = paste0(localPath, 
-#                                "/Environmental Protection Agency (EPA)/",
-#                                "Moore, Chris - Climate benefits of nutrient management/",
-#                                "analysis/store/",
-#                                "NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
-nhdSf <- st_read(dsn = "../store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
+nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                  layer = "NHDWaterbody") %>%
   select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
          GNIS_ID, GNIS_NAME, AREASQKM, 
@@ -103,36 +97,23 @@ dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
 
 ```{r load in models}
 knitr::opts_chunk$set(echo = TRUE)
-setwd(rprojroot::find_rstudio_root_file()) #force wd within a chunk
 
 #first load in all three models and the data
 
 # Total CH4 model.  mg CH4-C m-2 d-1
 # read from disk
-# mod <- readRDS(paste0(Sys.getenv("USERPROFILE"), 
-#                        "/Environmental Protection Agency (EPA)/",
-#                        "Moore, Chris - Climate benefits of nutrient management/",
-#                        "analysis/climateBenefits_jb/models/pCh4.rds"))
-mod.ch4 <- readRDS("models/pCh4.rds") #Hayley's path
+mod.ch4 <- readRDS("store/pCh4.rds") 
 
 summary(mod.ch4) # review model
 
 # # CO2 model.  mg CO2-C m-2 d-1
-# mod.co2 <- readRDS(paste0(Sys.getenv("USERPROFILE"),
-#                        "/Environmental Protection Agency (EPA)/",
-#                        "Moore, Chris - Climate benefits of nutrient management/",
-#                        "analysis/climateBenefits_jb/models/pCo2.rds"))
-mod.co2 <- readRDS(paste0("models/pCo2.rds")) #Hayley's path
+mod.co2 <- readRDS("store/pCo2.rds")
 
 summary(mod.co2) # review model
 
 
 # # N2O model. mg N2O-n m-2 day-1
-# mod.n2o <- readRDS(paste0(Sys.getenv("USERPROFILE"),
-#                        "/Environmental Protection Agency (EPA)/",
-#                        "Moore, Chris - Climate benefits of nutrient management/",
-#                        "analysis/climateBenefits_jb/models/pn2o.rds"))
-mod.n2o <- readRDS(paste0("models/pN2o.rds")) #Hayley's path
+mod.n2o <- readRDS("store/pN2o.rds") 
 
 summary(mod.n2o) # review model
 ```
@@ -146,7 +127,6 @@ The data in the example were generated independently as an example, but this is 
 Look at correlation between the two scenarios for both the predictors and the response.
 
 ```{r independence, warning=FALSE, fig.height=7}
-setwd(rprojroot::find_rstudio_root_file()) #force wd within a chunk
 
 #correlation between predictors
 chl_corr<-ggplot(chesDat, aes(x=Chla2010, y=ChlaTMDLnew)) +
@@ -234,6 +214,7 @@ The simulation approach is as follows:
 5) Repeat steps 1-4 1,000 times to obtain a distribution of reasonable reduction in emissions. The standard deviation of the 1,000 estimates is the estimate for total uncertainty. 
 
 ```{r simulation function}
+
 sim_cov<-function(dat=dat.sf, cov_emissions, mean_names, SE_names,
                   var_sol="ignore", conv_fun) {
   
