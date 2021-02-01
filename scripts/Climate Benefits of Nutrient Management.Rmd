@@ -102,9 +102,8 @@ chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) %>% # nothing obviously wrong with
 # merge datasets
 dat.sf <- merge(nhdSf, chesDat, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all chesDat observations
   mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
-  dplyr::select(-COMID) %>% # remove residual COMID column
-  st_transform(5070) # Transform to Albers for making map of US
-
+  dplyr::select(-COMID) # remove residual COMID column
+  
 dim(dat.sf) # 4247, good, kept all data
 
 #  All WB_ID preserved from chesDat?
@@ -113,22 +112,211 @@ sum(!(chesDat$WB_ID %in% dat.sf$WB_ID)) # all chesDat WB_ID in dat
 
 # how many missing AREASQKM?
 dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
+dat.sf <- dat.sf %>% dplyr::filter(!is.na(AREASQKM))# remove rows without area, corrupts ice extent calcs below
+dim(dat.sf) #4222, missing area deleted
+
+dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
 ```
 
-```{r fig.cap = "Location of 4,247 waterbodies in Chesapeake Bay model"}
+```{r fig.cap = "Location of 4,222 waterbodies in Chesapeake Bay Watershed model"}
+# read in chesapeake bay watershed boundary
+wsb <- st_read("maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp")
+
 # Map to make sure we are in correct region.
 states <- us_states() %>% # get states map
   filter(name %in% c("Virginia", "Maryland", "Delaware",
-                     "West Virginia", "Pennsylvania", "New York")) %>%
-  st_transform(5070)
+                     "West Virginia", "Pennsylvania", "New York")) 
 
 # Make a quick map.
 # This seems about right.
 ggplot(states) +
-  geom_sf() +
-  geom_sf(data = dat.sf)
+      geom_sf(data = wsb) +
+  geom_sf(fill = NA) +
+  geom_sf(data = dat.sf) +
+  coord_sf(crs = st_crs(5070)) # change to albers for plotting
 
-dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
+
+```
+
+
+##  Ice cover
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+lakeCtr <- st_centroid(dat.sf) # define centroid of lake polygon
+#plot(st_geometry(dat.sf)[1]) # plot one lake
+#plot(st_geometry(lakeCtr)[1], add = TRUE) # overlay centroid
+
+library(ncdf4)
+library(ncdf4.helpers)
+library(pbapply)
+# netCDF file------------------------------------------
+# awesome package vignette: 
+# https://cran.r-project.org/web/packages/futureheatwaves/vignettes/starting_from_netcdf.html#:~:text=You%20can%20read%20netCDF%20data,connection%20to%20a%20netCDF%20file.
+# ncdf file downloaded  from Climate Data Center
+ice <- nc_open("store/ice.cover.nc") 
+
+ice # good!  one variable with three dimensions!
+
+lon <- ncvar_get(ice, varid = "longitude") # extract longitude
+lat <- ncvar_get(ice, varid = "latitude") # extract latitude
+summary(lon);summary(lat) # lon matches bounding box for watershed, but lat encompasses a larger range.  I must have screwed up CDS query.  This doesn't hurt anything, but may slow things down.  
+
+
+# inspect time dimension
+ice$dim$time
+ice$dim$time$units # hours since 1900-01-01 00:00:00.0
+ice$dim$time$calendar # gregorian.  Good, consistent with base R as.Date
+
+ice.time <- as.POSIXct(ice$dim$time$vals * 3600, # convert hours to seconds, which are basis for POSIX class (60*60=3600)
+                        origin = as.POSIXct("1900-01-01 00:00:00"), tz = "UTC") # UTC per CDS manual
+ice.time # looks good
+
+# licd = lake ice depth see table 1 at
+# https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation#ERA5Land:datadocumentation-Howtouselake-relatedfields
+iceU <- ncvar_get(ice, varid = "licd") # pull ice depth data.   
+
+# This variable is in a 3 dimensional array ordered as longitude, then latitude, then time
+dim(iceU) # 51 391 242 
+dim(lon) # 51
+dim(lat) # 391
+dim(ice.time) # 242
+
+{# demo
+# # demo:  pull the modeled U10 at a certain location and time step.
+# lon.index <- which.min(abs(lon - sampFrm$lon.dd83[1])) # minimal distance between grid and desired location
+# lat.index <- which.min(abs(lat - sampFrm$lat.dd83[1])) # minimal distance between grid and desired location
+# time.index <- which(ice.time == as.POSIXct("2017-07-13 12:00:00")) # hourly data available.
+# 
+# iceU[lon.index, lat.index, time.index] # -0.9, cool!
+# 
+# # demo: get and plot full time series at grid point closes to lake:
+# iceU.ts <- nc.get.var.subset.by.axes(ice, "u10",
+#                                       axis.indices = list(X = lon.index,
+#                                                           Y = lat.index))
+# dim(iceU.ts) # 1 1 2208  1 lon, 1 lat, 2208 times
+# 
+# data_frame(time = ice.time,
+#            u10 = as.vector(iceU.ts)) %>%
+#   ggplot(aes(time, u10)) +
+#   geom_line()
+}
+
+# pull entire time series for each waterbody
+#1. calculate lon and lat indices for each row (e.g. waterbody)
+# need to project to WGS84 for lat long
+dim(lakeCtr) #4222
+dim(lon) #51
+
+lakeCtr <- lakeCtr %>% 
+  mutate(lk.lon = st_coordinates(.)[,1],
+         lk.lat = st_coordinates(.)[,2]) %>%
+  dplyr::select(lk.lat, lk.lon, WB_ID) %>%
+  st_drop_geometry() %>%
+  rowwise() %>% # mutate by row!!!!
+  mutate(lon.index = which.min(abs(lon - lk.lon)), # index for minimum distance between target and grid longitude
+         lat.index = which.min(abs(lat - lk.lat)), # index for minimum distance between target and grid latitude
+         lon.grid = lon[lon.index], # extract lon of closest grid, not needed for calcs, just to double check map matches observed
+         lat.grid = lat[lat.index]) %>% # extract lat of closest grid, not needed for calcs, just to double check map matches observed
+  ungroup()
+
+# double check that extracted grids are spatially matched to lake targets
+lakeCtr %>%
+  dplyr::select(lk.lon, lk.lat, lon.grid, lat.grid) %>% # yes
+  print(n=Inf)
+
+
+#2. split dataframe into list
+lakeCtr.l <- split(lakeCtr, seq(nrow(lakeCtr)))
+
+
+#3. extract ice depth time series for each waterbody and place in list element.
+# each list element is a df containing full time series (Jan - March 2019, Nov - Dec. 2019, 
+# Jan - March 2020, Nov - Dec 2020) of ice depth for each lake.
+# 22 seconds
+lakeCtr.l.i <- pblapply(lakeCtr.l, function(x) { # pblapply produces progress bar
+  data.frame(ice = nc.get.var.subset.by.axes(ice, "licd", # extract u10 component 
+                                             axis.indices = list(X = x$lon.index,
+                                                                 Y = x$lat.index)) %>%
+               as.vector(),
+             time = ice.time, # add time stamp (daily ice data)
+             date = as.Date(ice.time), # collapse time stamp to date
+             lk.lat = x$lk.lat, # add latitude
+             lk.lon = x$lk.lon, # add longitude
+             WB_ID = x$WB_ID) %>% # add waterbody ID
+    # filter out extra time periods that came with climate data center download.
+    dplyr::filter(date > as.Date("2019-10-01"),
+                  date < as.Date("2020-04-01")) %>%
+    #  lake ice can be fractional within a grid-box with inland water (10 cm of ice means 
+    # 100 % of a grid-box or tile is covered with ice; 0 cm of ice means 100 % of the grid-box 
+    # is covered by water; in between a linear interpolation is applied)
+    mutate(ice = ice * 100, # convert from m to cm:  
+           ice.present = ifelse(ice > 1, # thickness > 1 cm
+                                1, # yes, ice cover
+                                0)) %>% # else, no ice cover
+    summarise(day.of.ice = sum(ice.present))
+
+})
+
+lakeCtr.i <- do.call("rbind", lakeCtr.l.i) # 30 seconds
+head(lakeCtr.i) # day of ice per row
+dim(lakeCtr.i) # 4222, 1
+names(lakeCtr.i) # day.of.ice
+names(lakeCtr) 
+
+# convert to sf object
+lakeCtr.sf <- cbind(lakeCtr, lakeCtr.i) %>%
+  st_as_sf(coords = c("lk.lon", "lk.lat"), crs = 4269)
+
+# 165 lakes missing ice data?
+lakeCtr.sf %>% dplyr::filter(is.na(day.of.ice))
+
+# Prepare to write to .shp.  will fill missing values with nearest neighbor values
+# in ArcGIS Pro.
+lakeCtr_sf <- lakeCtr.sf %>% 
+  rename_all(function(x) gsub("\\.", "_", x)) %>% # replace . with _
+  # .shp replaces NA with 0!  used -9999 as flag to screen in GIS.
+  # in GIS, convert to .gdb, select all -9999 values, use field calculator
+  # to set to 'None', then use 'Fill Missing Values" tool (K (5) nearest neighbors).
+  # finally, use spatial join to merge filled values with original file.
+  mutate(day_of_ice = replace(day_of_ice, is.na(day_of_ice), -9999)) 
+
+# write .shp
+# st_write(lakeCtr_sf, "output/iceCover.shp", delete_layer = TRUE)
+
+# Can't get .gpkg to work?  File not readable in ArcGIS?
+# st_write(obj = lakeCtr_sf,
+#          dsn = "output/iceCover.gpkg",
+#          layer = "ice_cover",
+#          append = FALSE,
+#          driver = "GPKG")
+# st_layers("output/iceCover.gpkg")
+
+# read in file with missing values filled in
+iceCover <- st_read("output/iceCover.gdb", layer = "iceCoverFill") %>%
+  rename(day_of_ice_filled = DAY_OF_ICE_1) %>%
+  dplyr::select(WB_ID, day_of_ice_filled)
+
+# no missing values!
+iceCover %>% dplyr::filter(is.na(day_of_ice_filled))
+names(iceCover)
+
+# merge ice cover estimates with dat
+dim(dat) # 4222
+dat <- inner_join(dat, st_drop_geometry(iceCover))
+dim(dat) # 4222
+```
+
+Ice cover effectively eliminates the exchange of gases between lakes and the atmosphere; therefore GHG emission rates are 0 during periods of ice cover.  Duration of ice cover during the winter of 2019 - 2020 was downloaded from the ERA-5 Land data set (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land?tab=overview) and spatially joined to the centroid of the NHD polygon for each waterbody in the watershed. Total days of ice cover range from `r min(lakeCtr.i$day.of.ice, na.rm = TRUE)` to `r max(lakeCtr.i$day.of.ice, na.rm = TRUE)`, with lakes in the northern portion of the watershed experiencing longer ice-cover duration than those in the south.
+
+```{r message = FALSE, fig.cap = "Ice cover duration during the 2019-2020 winter for waterbodies in Chesapeake Bay Watershed model"}
+ggplot(states) +
+      geom_sf(data = wsb) + # 
+  geom_sf(fill = NA) +
+  geom_sf(data = iceCover, aes(color = day_of_ice_filled)) +
+  coord_sf(crs = st_crs(5070)) # change to albers for plotting
+
+ggsave("output/figures/iceCover.tiff")
+
 ```
 
 
@@ -136,7 +324,7 @@ dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calc
 # GHG model
 DelSontro et al. (2018) present linear regression models based on literature reports of chl concentration (ug/L), TP concentration (ug/L) and areal GHG emission rates (mg CH~4~-C m^-2^ day^-1^).  The models were created on the log-log scale with a small positive offset to accommodate negative areal emission rates reported in the literature.  Below we read in the model objects.
 
-```{r}
+```{r }
 # Total CH4 model.  mg CH4-C m-2 d-1
 # read from disk
 mod.ch4 <- readRDS("store/pCh4.rds")
@@ -251,6 +439,7 @@ ggplot(preds, aes(log.preds, ihs.preds)) +
 
 ```
 
+# Upscaling
 ## GHG Emissions and Uncertainty Estimates
 
 We use the DelSontro et al. (2018) models to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) for each waterbody under the 2010 and TMDLnew scenarios.  Uncertainty was estimated using two approaches.  
@@ -457,13 +646,13 @@ dat[1:5, ] %>% dplyr::select(WB_ID, matches("ch4.*lk.d")) %>%
 ```
 
 ### Upscale daily emissions to annual emissions
-The models used to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) are based on published measurements, most of which were made during the warm summer months when emission rates are expected to be greatest.  We therefore assume the predicted areal emission rates are constant during the open-water season.  During periods of ice cover, which conservatively extend from Nov.15 - March 15 in the Chesapeake Bay watershed, areal emission rates are zero.  
+The models used to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) are based on published measurements, most of which were made during the warm summer months when emission rates are expected to be greatest.  We therefore assume the predicted areal emission rates are constant during the open-water season.  During periods of ice cover (see above) areal emission rates are zero.  
 
 ```{r}
 dat <- dat %>%
-  dplyr::select(WB_ID, contains("lk.d")) %>%
-  mutate_at(vars(-WB_ID), function(x) x * (365 - 120)) %>% # 120 days of ice cover
-  rename_at(vars(-WB_ID), function(x) gsub(".d", ".yr", x))
+  dplyr::select(WB_ID, day_of_ice_filled, contains("lk.d")) %>%
+  mutate_at(vars(-WB_ID, -day_of_ice_filled), function(x) x * (365 - .$day_of_ice_filled)) %>% # ice cover duration winter 2019-2020
+  rename_at(vars(-WB_ID, -day_of_ice_filled), function(x) gsub(".d", ".yr", x))
 ```
 
 
@@ -532,7 +721,7 @@ dat.sum %>%
 
 ### Incremental change and uncertainty with bootstrapping
 
-An alternative approach to estimating uncertainty is to bootstrap a sample from the `r chesDat %>% nrow()` waterbodies in the data.  This approach assumes the statistical predictions are correct, then simulates sampling error by bootstrapping across the sample.  As shown below, this generates much narrower confidence intervals than the approach utilizing the statistical prediction error.  This probably isn't the appropriate approach because we have a census of lake (e.g. perfect knowledge of the population) rather than a sample.
+An alternative approach to estimating uncertainty is to bootstrap a sample from the `r dat %>% nrow()` waterbodies in the data.  This approach assumes the statistical predictions are correct, then simulates sampling error by bootstrapping across the sample.  As shown below, this generates much narrower confidence intervals than the approach utilizing the statistical prediction error.  This probably isn't the appropriate approach because we have a census of lake (e.g. perfect knowledge of the population) rather than a sample.
 
 ```{r}
 # CALCULATE GHG EMISSIONS, AND INCREMENTAL CHANGES FOR GHG, CHLA, AND P-------------------
@@ -587,8 +776,8 @@ An alternative approach to estimating uncertainty is to exploit the uncertainty 
 
 ```{r results='hide', message=FALSE, warning=FALSE}
 
-dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
-lakes <- dat %>% dplyr::select(WB_ID,AREASQKM)
+dat <- inner_join(as_tibble(dat.sf), as_tibble(iceCover))
+lakes <- dat %>% dplyr::select(WB_ID,AREASQKM,day_of_ice_filled)
 
 #####################################
 ################################  CH4
@@ -623,18 +812,31 @@ coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
 
 ## Predictions based on model uncertainty
 preds_2010_lakes <- cbind(lakes,
+                          # %*% matrix multiplication
                           dat_2010 %*% coefs) # this produces emission rate as log10(CH4-C + offset)
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes[,3])) # transform according to functions above -> mg CH4 m-2 day-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes[,3])) # transform according to functions above -> mg CH4 m-2 day-1
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes$`dat_2010 %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+##  Winter rate
+# Waldo et al In Prep.  Mean rate from Nov.1 - April 1 = 14.4
+ch4.winter <- 14.4 # mg CH4 m-2 d-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CH4 year-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CH4 year-1
+
+
+#################################
+#################################
+preds_2010_lakes %<>% mutate(preds_2010_lakes = ((preds_2010_lakes * (7*30)) + # emissions during 7 warm months (April 1 - Nov. 1)
+                                                   (ch4.winter * ((5*30)-day_of_ice_filled))) * # 5 months of open-water winter rates, discounted by days of ice
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+
+
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = ((preds_tmdl_lakes * (7*30)) + # emissions during 7 warm months (April 1 - Nov. 1)
+                                                   (ch4.winter * ((5*30) - day_of_ice_filled))) * # 5 months of open-water winter rates, discounted by days of ice
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
@@ -680,7 +882,7 @@ dat_tmdl <-  dat %>%
 ####  PREDICTIONS
 
 set.seed(42)
-diff_co2 <- replicate(10000, {
+diff_co2 <- replicate(10000, { #10000
   
 ## Distribution of coefficients 
 coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
@@ -691,14 +893,23 @@ preds_2010_lakes <- cbind(lakes,
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes[,3])) # transform according to functions above. mg CO2 m-2 day-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes[,3])) # transform according to functions above. mg CO2 m-2 day-1
+##  Winter rate
+# Data are mixed for CO2.  Jones et al 2016 report uptake during summer and outgassing
+# during winter for midwestern lakes.  Knoll et al reports sustained outgassing for an Ohio
+# Lake.  I think it best to assume 1) emissions during ice-cover are 0, and 2) emissions are 
+# equal to model predictions during the rest of the year.  
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CO2 year-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg CO2 year-1
+#################################
+#################################
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes$`dat_2010 %*% coefs`)) # transform according to functions above. mg CO2 m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above. mg CO2 m-2 day-1
+
+preds_2010_lakes %<>% mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
+
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg CO2 d-1
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
@@ -751,14 +962,20 @@ preds_2010_lakes <- cbind(lakes,
 preds_tmdl_lakes <- cbind(lakes,
                           dat_tmdl %*% coefs)
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes[,3]),) # transform according to functions above. mg N2O m-2 day-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes[,3])) # transform according to functions above. mg N2O m-2 day-1
+# Winter rates
+# Few annual data available for N2O.  Kortelainen et al. 2020 reported peak N2O during winter in Finnish lakes,
+# but Beaulieu et al. 2010 reported peak N2O during summer in the Ohio River and negligable N2O during the
+# winter.  I think it best to assume 1) emissions during ice-cover are 0, and 2) emissions are 
+# equal to model predictions during the rest of the year.  
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * 1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes$`dat_2010 %*% coefs`)) # transform according to functions above. mg N2O m-2 day-1
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above. mg N2O m-2 day-1
 
-preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg N2O year-1
-preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes * (365 - 120), na.rm=TRUE) # 120 days of ice cover. mg N2O year-1
+preds_2010_lakes %<>% mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days 
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+                             
+preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+                               1000000 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
 
 preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1000*1000*1000), na.rm=TRUE) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
