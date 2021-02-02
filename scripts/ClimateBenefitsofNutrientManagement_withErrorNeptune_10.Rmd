@@ -20,7 +20,7 @@ editor_options:
 The objective is to propagate model uncertainty to obtain an estimate of total reduction in emissions of three gases (CH~4~, CO~2~, and N~2~O), and uncertainty around each estimate.
 
 ```{r setup unit functions, message=FALSE, warning=FALSE}
-require(ggplot2)
+library(ggplot2)
 require(dplyr)
 require(sf)
 
