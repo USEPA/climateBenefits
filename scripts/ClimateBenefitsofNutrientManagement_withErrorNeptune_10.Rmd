@@ -291,7 +291,7 @@ sim_cov<-function(dat=dat.sf, cov_emissions, mean_names, SE_names,
 
 ## Reduction in CH~4~ Emissions
 
-```{r methane, cache=T}
+```{r methane}
 
 #use the covariance of emissions
 cov(dat.sf$CH4_pred_2010, dat.sf$CH4_pred_TMDL)
@@ -353,7 +353,7 @@ However, in this case, the estimated total reduction in CH~4~ emissions can be a
 
 ## Reduction in  CO~2~ Emissions
 
-```{r CO2, cache=T}
+```{r CO2}
 use_co2_dat<-dat.sf[which(!is.na(dat.sf$CO2_pred_2010) & !is.na(dat.sf$CO2_pred_TMDL)),]
 #removes the locations with NA surface area.
 
@@ -393,7 +393,7 @@ In this case, the estimated total reduction in CO~2~ emissions can be approximat
 
 ## Reduction in  N~2~O Emissions
 
-```{r N2O, cache=T}
+```{r N2O}
 use_n2o_dat<-dat.sf[which(!is.na(dat.sf$N2O_pred_2010) & !is.na(dat.sf$N2O_pred_TMDL)),]
 #removes the locations with NA surface area.
 
@@ -527,7 +527,7 @@ sim_cov_bootstrap<-function(dat, n=nrow(dat), mean_names, SE_names,
 
 ## CH~4~ Emissions
 
-```{r CH4 boot, fig.height=9, cache=T}
+```{r CH4 boot, fig.height=9}
 
 set.seed(0)
 total_reduction_CH4_withbootstrap<-
@@ -557,7 +557,7 @@ It appears that sampling uncertainty contributes very little to overall uncertai
 
 ## CO~2~ Emissions
 
-```{r CO2 boot, fig.height=9, cache=T}
+```{r CO2 boot, fig.height=9}
 set.seed(0)
 total_reduction_CO2_withbootstrap<-
   replicate(10, sim_cov_bootstrap(dat=use_co2_dat, n=nrow(use_co2_dat), 
@@ -585,7 +585,7 @@ Again, it appears that sampling uncertainty contributes very little to overall u
 
 ## N~2~O Emissions
 
-```{r N2O boot, fig.height=9, cache=T}
+```{r N2O boot, fig.height=9}
 set.seed(0)
 total_reduction_N2O_withbootstrap<-
   replicate(10, sim_cov_bootstrap(dat=use_n2o_dat, n=nrow(use_n2o_dat), 
