@@ -119,7 +119,7 @@ mapshot(map_chesData_and_NHD, url = "maps/chesData_and_NHD.html")
 states2 <- st_transform(states,st_crs(nhdSf)) 
 nhd_in_region <- st_intersection(nhdSf,states2)
 map_nhd <- mapview(nhdSf, zcol = "COMID", legend = F, alpha.regions = 0.3, aplha = 1)
-mapshot(map_milstead_chesDat_not_in_ndh, url = "maps/milstead_chesDat_not_in_ndh.html")
+mapshot(map_nhd, url = "maps/nhd_lakes.html")
 
 
 # ###################################################
