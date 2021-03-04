@@ -153,14 +153,13 @@ library(pbapply)
 # awesome package vignette: 
 # https://cran.r-project.org/web/packages/futureheatwaves/vignettes/starting_from_netcdf.html#:~:text=You%20can%20read%20netCDF%20data,connection%20to%20a%20netCDF%20file.
 # ncdf file downloaded  from Climate Data Center
-ice <- nc_open("store/ice.cover.nc") 
+ice <- nc_open("store/ice.cover.10year.nc") 
 
 ice # good!  one variable with three dimensions!
 
 lon <- ncvar_get(ice, varid = "longitude") # extract longitude
 lat <- ncvar_get(ice, varid = "latitude") # extract latitude
-summary(lon);summary(lat) # lon matches bounding box for watershed, but lat encompasses a larger range.  I must have screwed up CDS query.  This doesn't hurt anything, but may slow things down.  
-
+summary(lon);summary(lat) # lon matches bounding box for watershed
 
 # inspect time dimension
 ice$dim$time
@@ -176,10 +175,10 @@ ice.time # looks good
 iceU <- ncvar_get(ice, varid = "licd") # pull ice depth data.   
 
 # This variable is in a 3 dimensional array ordered as longitude, then latitude, then time
-dim(iceU) # 51 391 242 
-dim(lon) # 51
-dim(lat) # 391
-dim(ice.time) # 242
+dim(iceU) # 71 81 1513 
+dim(lon) # 71
+dim(lat) # 81
+dim(ice.time) # 1513
 
 {# demo
 # # demo:  pull the modeled U10 at a certain location and time step.
@@ -205,7 +204,7 @@ dim(ice.time) # 242
 #1. calculate lon and lat indices for each row (e.g. waterbody)
 # need to project to WGS84 for lat long
 dim(lakeCtr) #4222
-dim(lon) #51
+dim(lon) #71
 
 lakeCtr <- lakeCtr %>% 
   mutate(lk.lon = st_coordinates(.)[,1],
@@ -230,11 +229,21 @@ lakeCtr.l <- split(lakeCtr, seq(nrow(lakeCtr)))
 
 
 #3. extract ice depth time series for each waterbody and place in list element.
-# each list element is a df containing full time series (Jan - March 2019, Nov - Dec. 2019, 
-# Jan - March 2020, Nov - Dec 2020) of ice depth for each lake.
-# 22 seconds
+# each list element is a df containing full time series of ice depth for each lake.
+# winter 2010/2011: Nov - Dec. 2010, Jan - March 2011
+# winter 2011/2012: Nov - Dec. 2011, Jan - March 2012
+# winter 2012/2013: Nov - Dec. 2012, Jan - March 2013
+# winter 2013/2014: Nov - Dec. 2013, Jan - March 2014
+# winter 2014/2015: Nov - Dec. 2014, Jan - March 2015
+# winter 2015/2016: Nov - Dec. 2015, Jan - March 2016
+# winter 2016/2017: Nov - Dec. 2016, Jan - March 2017
+# winter 2017/2018: Nov - Dec. 2017, Jan - March 2018
+# winter 2018/2019: Nov - Dec. 2018, Jan - March 2019
+# winter 2019/2020: Nov - Dec. 2019, Jan - March 2020
+
+# 2 minutes
 lakeCtr.l.i <- pblapply(lakeCtr.l, function(x) { # pblapply produces progress bar
-  data.frame(ice = nc.get.var.subset.by.axes(ice, "licd", # extract u10 component 
+  data.frame(ice = nc.get.var.subset.by.axes(ice, "licd", # extract ice cover component 
                                              axis.indices = list(X = x$lon.index,
                                                                  Y = x$lat.index)) %>%
                as.vector(),
@@ -244,21 +253,44 @@ lakeCtr.l.i <- pblapply(lakeCtr.l, function(x) { # pblapply produces progress ba
              lk.lon = x$lk.lon, # add longitude
              WB_ID = x$WB_ID) %>% # add waterbody ID
     # filter out extra time periods that came with climate data center download.
-    dplyr::filter(date > as.Date("2019-10-01"),
-                  date < as.Date("2020-04-01")) %>%
+    dplyr::filter(date > as.Date("2010-10-01"), # exclude Jan-Mar 2010
+                  date < as.Date("2020-04-01")) %>% # exclude Nov-Dec 2020
     #  lake ice can be fractional within a grid-box with inland water (10 cm of ice means 
     # 100 % of a grid-box or tile is covered with ice; 0 cm of ice means 100 % of the grid-box 
     # is covered by water; in between a linear interpolation is applied)
     mutate(ice = ice * 100, # convert from m to cm:  
            ice.present = ifelse(ice > 1, # thickness > 1 cm
                                 1, # yes, ice cover
-                                0)) %>% # else, no ice cover
-    summarise(day.of.ice = sum(ice.present))
+                                0), # else, no ice cover
+    ice.year = ifelse(time < as.Date("2011-04-01"),
+                      "2010/2011",
+                      ifelse(time > as.Date("2011-04-01") & time < as.Date("2012-04-01"),
+                             "2011/2012",
+                             ifelse(time > as.Date("2012-04-01") & time < as.Date("2013-04-01"),
+                                    "2012/2013",
+                                    ifelse(time > as.Date("2013-04-01") & time < as.Date("2014-04-01"),
+                                           "2013/2014",
+                                           ifelse(time > as.Date("2014-04-01") & time < as.Date("2015-04-01"),
+                                                  "2014/2015",
+                                                  ifelse(time > as.Date("2015-04-01") & time < as.Date("2016-04-01"),
+                                                         "2015/2016",
+                                                         ifelse(time > as.Date("2016-04-01") & time < as.Date("2017-04-01"),
+                                                                "2016/2017",
+                                                                ifelse(time > as.Date("2017-04-01") & time < as.Date("2018-04-01"),
+                                                                       "2017/2018",
+                                                       ifelse(time > as.Date("2018-04-01") & time < as.Date("2019-04-01"),
+                                                              "2018/2019",
+                                                  ifelse(time > as.Date("2019-04-01"),
+                                                         "2019/2020",
+                                                         "test"))))))))))) %>% # test if no match.  should be none
+    group_by(ice.year) %>%
+    summarise(day.of.ice = sum(ice.present)) %>% # this gives total days of ice per year
+    summarise(day.of.ice = mean(day.of.ice)) # average days of ice across ten years
 
 })
 
-lakeCtr.i <- do.call("rbind", lakeCtr.l.i) # 30 seconds
-head(lakeCtr.i) # day of ice per row
+lakeCtr.i <- do.call("rbind", lakeCtr.l.i) # 
+head(lakeCtr.i) # 10 year mean day of ice per row
 dim(lakeCtr.i) # 4222, 1
 names(lakeCtr.i) # day.of.ice
 names(lakeCtr) 
@@ -274,10 +306,10 @@ lakeCtr.sf %>% dplyr::filter(is.na(day.of.ice))
 # in ArcGIS Pro.
 lakeCtr_sf <- lakeCtr.sf %>% 
   rename_all(function(x) gsub("\\.", "_", x)) %>% # replace . with _
-  # .shp replaces NA with 0!  used -9999 as flag to screen in GIS.
-  # in GIS, convert to .gdb, select all -9999 values, use field calculator
+  # .shp replaces NA with 0!  To avoid this, I replaced all NA with -9999 as flag to screen in GIS (see below).
+  # In GIS, convert .shp to .gdb, select all -9999 values, use field calculator
   # to set to 'None', then use 'Fill Missing Values" tool (K (5) nearest neighbors).
-  # finally, use spatial join to merge filled values with original file.
+  # finally, use 'Spatial Join' in GIS to merge filled values with original file.
   mutate(day_of_ice = replace(day_of_ice, is.na(day_of_ice), -9999)) 
 
 # write .shp
@@ -821,9 +853,11 @@ preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes$`dat_2010 
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
 
 ##  Winter rate
-# Waldo et al In Prep.  Mean rate from Nov.1 - April 1 = 14.4
-ch4.winter <- 14.4 # mg CH4 m-2 d-1
-
+# Waldo et al In Review.  Mean rate from Nov.1 - April 1 = 14.4 +/-16.56
+# this generates a winter emission rate for each lake based on the mean and sd
+# reported in Waldo et al.  Each lake will have a different winter rate, but 
+# the same rate will be used for 2010 and tmdl scenarios
+ch4.winter <- rnorm(n = nrow(lakes), mean = 14.4, sd = 16.56) # mg CH4 m-2 d-1
 
 
 #################################
