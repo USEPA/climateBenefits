@@ -1,9 +1,5 @@
 ## Written by: US EPA National Center for Environmental Economics
 
-###############################################################################
-###########################    Summary Statistics   ###########################
-###############################################################################
-
 ##########################
 #################  LIBRARY
 ##########################
@@ -36,38 +32,37 @@ setwd(here())
 inflation <-  1.228575
 
 ## List of gases
-hfc_list <- c('32','125','134a','143a','152a','227ea','236fa','245fa','4310mee')
+gas_list <- c('CO2','N2O','CH4')
 
 ##########################
 ##############  START LOOP
 ##########################
 
-for (hfc in hfc_list) {
+for (thisgas in gas_list) {
   
-  dice_dir    <- paste0("data\\hfc",hfc,"\\dice") # location of file group
-  dice_files  <- fs::dir_ls(dice_dir, regexp = "\\.csv$") # create list of .csv files
+  dice_dir    <- paste0("data\\",thisgas,"\\dice")                              # location of file group
+  dice_files  <- fs::dir_ls(dice_dir, regexp = "\\.csv$")                       # create list of .csv files
   dice        <- dice_files %>% 
-                     map_dfr(read_csv, skip = 1, col_names = FALSE, .id = "source") %>% # read in files (map), turn into data frame (df), and row bind (r)
-                     as.data.table() %>%
-                     setnames(c('X1','X2','X3','X4','X5','X6','X7','X8','X9'),c('2020','2025','2030','2035','2040','2045','2050','2055','2060'))
+                     map_dfr(read_csv, .id = "source") %>%                      # read in files (map), turn into data frame (df), and row bind (r)
+                     as.data.table()
 
-  fund_dir    <- paste0("data\\hfc",hfc,"\\fund") # location of file group
-  fund_files  <- fs::dir_ls(fund_dir, regexp = "\\.csv$") # create list of .csv files
+  fund_dir    <- paste0("data\\",thisgas,"\\fund") 
+  fund_files  <- fs::dir_ls(fund_dir, regexp = "\\.csv$") 
   fund        <- fund_files %>% 
-                     map_dfr(read_csv, .id = "source") %>% # read in files (map), turn into data frame (df), and row bind (r)
+                     map_dfr(read_csv, .id = "source") %>% 
                      as.data.table()
   
-  page_dir    <- paste0("data\\hfc",hfc,"\\page") # location of file group
-  page_files  <- fs::dir_ls(page_dir, regexp = "\\.csv$") # create list of .csv files
+  page_dir    <- paste0("data\\",thisgas,"\\page") 
+  page_files  <- fs::dir_ls(page_dir, regexp = "\\.csv$") 
   page        <- page_files %>% 
-                     map_dfr(read_csv, .id = "source") %>% # read in files (map), turn into data frame (df), and row bind (r)
+                     map_dfr(read_csv, .id = "source") %>% 
                      as.data.table()
   
 ##########################
 ###################  CLEAN
 ##########################
 
-dice %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/dice/"))) %>%
+dice %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/dice/"))) %>%
           mutate(source = str_remove(source,".csv")) %>%
           separate(source, c("scenario","discount_rate","geography"), " ") %>%
           mutate(geography = case_when(is.na(geography) ~ 'Global',
@@ -81,7 +76,7 @@ dice %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/dice/"))) %>
           group_by(scenario,discount_rate,geography) %>%
           mutate(trial = seq(n()))
 
-fund %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/fund/"))) %>%
+fund %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/fund/"))) %>%
           mutate(source = str_remove(source,".csv")) %>%
           separate(source, c("scenario","discount_rate","geography"), " ") %>%
           mutate(geography = case_when(is.na(geography) ~ 'Global',
@@ -95,7 +90,7 @@ fund %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/fund/"))) %>
           group_by(scenario,discount_rate,geography) %>%
           mutate(trial = seq(n()))
 
-page %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/page/"))) %>%
+page %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/page/"))) %>%
           mutate(source = str_remove(source,".csv")) %>%
           separate(source, c("scenario","discount_rate","geography"), " ") %>%
           mutate(geography = case_when(is.na(geography) ~ 'Global',
@@ -124,7 +119,7 @@ page %<>% gather(year,estimate,years) %>%
           setkey(scenario,discount_rate,trial,year,model)
 
 ## load page discontinuities and drop trues
-page_disc <- read_csv(paste0("..\\..\\data\\hfc",hfc,"_page_discontinuity.csv")) %>% 
+page_disc <- read_csv(paste0("data\\",thisgas,"_page_discontinuity.csv")) %>% 
              as.data.table() %>% 
              setkey(scenario,discount_rate,trial,year,model) %>%
              mutate(year = as.character(year))
@@ -137,7 +132,7 @@ page <- page_disc[page] %>%
 
 ## COMBINE
 data <- rbind(dice,fund,page) %>%
-        mutate(gas=paste0('HFC',hfc))
+        mutate(gas=paste0(thisgas))
 
 ##########################
 ###################  MEANS
@@ -198,11 +193,12 @@ page_table <- rbind(page_means,page_high_impact)
 ####################  SAVE
 ##########################
 
-write_csv(data, paste0("..\\..\\data\\hfc",hfc,".csv"))
-write_csv(table, paste0("..\\..\\data\\hfc",hfc,"_table.csv"))
-write_csv(dice_table, paste0("..\\..\\data\\hfc",hfc,"_dice_table.csv"))
-write_csv(fund_table, paste0("..\\..\\data\\hfc",hfc,"_fund_table.csv"))
-write_csv(page_table, paste0("..\\..\\data\\hfc",hfc,"_page_table.csv"))
+write_csv(data, paste0("data\\",thisgas,".csv"))
+write_csv(table, paste0("data\\",thisgas,"_table.csv"))
+write_csv(dice_table, paste0("data\\",thisgas,"_dice_table.csv"))
+write_csv(fund_table, paste0("data\\",thisgas,"_fund_table.csv"))
+write_csv(page_table, paste0("data\\",thisgas,"_page_table.csv"))
 
 }
+
 ## END OF SCRIPT. Have a great day!

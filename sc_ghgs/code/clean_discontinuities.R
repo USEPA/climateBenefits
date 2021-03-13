@@ -1,9 +1,5 @@
 ## Written by: US EPA National Center for Environmental Economics
 
-###############################################################################
-###########################    Summary Statistics   ###########################
-###############################################################################
-
 ##########################
 #################  LIBRARY
 ##########################
@@ -33,25 +29,25 @@ lapply(packages, pkgTest)
 setwd(here())
 
 ## List of gases
-hfc_list <- c('32','125','134a','143a','152a','227ea','236fa','245fa','4310mee')
+gas_list <- c('CO2','N2O','CH4')
 
 ##########################
 ##############  START LOOP
 ##########################
 
-for (hfc in hfc_list) {
+for (thisgas in gas_list) {
   
-page_dir    <- paste0("data\\hfc",hfc,"\\page\\discontinuity_mismatch") # location of file group
-page_files  <- fs::dir_ls(page_dir, regexp = "\\.csv$") # create list of .csv files
+page_dir    <- paste0("data\\",thisgas,"\\page\\discontinuity_mismatch")            # location of file group
+page_files  <- fs::dir_ls(page_dir, regexp = "\\.csv$")                         # create list of .csv files
 page        <- page_files %>% 
-                  map_dfr(read_csv, .id = "source") %>% # read in files (map), turn into data frame (df), and row bind (r)
+                  map_dfr(read_csv, .id = "source") %>%                         # read in files (map), turn into data frame (df), and row bind (r)
                   as.data.table()
 
 ##########################
 ###################  CLEAN
 ##########################
 
-page %<>% mutate(source = str_remove(source,paste0("data/hfc",hfc,"/page/discontinuity_mismatch/"))) %>%
+page %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/page/discontinuity_mismatch/"))) %>%
           mutate(source = str_remove(source,".csv")) %>%
           separate(source, c("scenario","discount_rate"), " ") %>%
           mutate(scenario = case_when(scenario=="USG1" ~ "IMAGE",
@@ -72,7 +68,7 @@ page %<>% gather(year,discontinuity,all_of(years)) %>%
 ####################  SAVE
 ##########################
 
-write_csv(page, paste0("..\\..\\data\\hfc",hfc,"_page_discontinuity.csv"))
+write_csv(page, paste0("data\\",thisgas,"_page_discontinuity.csv"))
 
 }
 

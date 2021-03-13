@@ -1,9 +1,5 @@
 ## Written by: US EPA National Center for Environmental Economics
 
-###############################################################################
-###########################    Summary Statistics   ###########################
-###############################################################################
-
 ##########################
 #################  LIBRARY
 ##########################
@@ -33,20 +29,20 @@ lapply(packages, pkgTest)
 setwd(here())
 
 ## List of gases
-hfc_list <- c('32','125','134a','143a','152a','227ea','236fa','245fa','4310mee')
-discount_rates <- c('2.5%','3%','5%')
+gas_list <- c('CO2','N2O','CH4')
+discount_rates <- c('2%','3%')
 
 ##########################
 ##############  START LOOP
 ##########################
 
-for (hfc in hfc_list) {
+for (thisgas in gas_list) {
 
 ##########################
 ##############  READ DATA
 ##########################
 
-data <- read_csv(paste0("..\\..\\data\\hfc",hfc,".csv")) %>% 
+data <- read_csv(paste0("data\\",thisgas,".csv")) %>% 
                  filter(geography=="Global" & discount_rate %in% discount_rates) %>% 
                  select(!geography)
 
@@ -72,30 +68,30 @@ high_impact <- data %>%
 
 table <- rbind(means,high_impact)
 
-assign(paste0("table_", hfc), table)
+assign(paste0("table_", thisgas), table)
 }
 
-sc_hfc_table <- rbind(table_32,table_125,table_134a,table_143a,table_152a,table_227ea,table_236fa,table_245fa,table_4310mee)
+sc_ghg_table <- rbind(table_CO2,table_N2O,table_CH4)
 
 
 # create sequence of dates
 annual <- data.frame(year = rep(seq(2020,2060,1),12),
                      discount_rate = c(rep('2.5%',41),rep('3%',41),rep('5%',41),rep('3% 95th Pct.',41)),
-                     gas  = c(rep('HFC32',164),rep('HFC125',164),rep('HFC134a',164),rep('HFC143a',164),rep('HFC152a',164),rep('HFC227ea',164),rep('HFC236fa',164),rep('HFC245fa',164),rep('HFC4310mee',164))) 
+                     gas  = c(rep('CO2',164),rep('N2O',164),rep('CH4',164))) 
 
 # create sequence of dates
 five_year <- data.frame(year = rep(seq(2020,2060,5),12),
                         discount_rate = c(rep('2.5%',9),rep('3%',9),rep('5%',9),rep('3% 95th Pct.',9)),
-                        gas  = c(rep('HFC32',36),rep('HFC125',36),rep('HFC134a',36),rep('HFC143a',36),rep('HFC152a',36),rep('HFC227ea',36),rep('HFC236fa',36),rep('HFC245fa',36),rep('HFC4310mee',36))) 
+                        gas  = c(rep('CO2',36),rep('N2O',36),rep('CH4',36))) 
 
 # merge
-annual_unrounded <- merge(annual,sc_hfc_table,all=TRUE) %>% 
+annual_unrounded <- merge(annual,sc_ghg_table,all=TRUE) %>% 
   arrange(gas,discount_rate,year) %>%
   group_by(gas,discount_rate) %>%
   mutate(mean = na.approx(mean)) 
 
 # merge
-five_year_unrounded <- merge(five_year,sc_hfc_table,all=TRUE) %>% 
+five_year_unrounded <- merge(five_year,sc_ghg_table,all=TRUE) %>% 
   arrange(gas,discount_rate,year) %>%
   group_by(gas,discount_rate) %>%
   mutate(mean = na.approx(mean))
@@ -112,9 +108,8 @@ five_year_w <- five_year_unrounded %>%
 ####################  SAVE
 ##########################
 
-write_excel_csv(annual_w, "data\\schfc_annual_unrounded.csv")
-write_excel_csv(five_year_w, "data\\schfc_five_year_unrounded.csv")
-
+write_excel_csv(annual_w, "data\\sc_ghg_annual_unrounded.csv")
+write_excel_csv(five_year_w, "data\\sc_ghg_five_year_unrounded.csv")
 
 
 ## END OF SCRIPT. Have a great day!
