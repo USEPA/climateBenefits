@@ -20,8 +20,8 @@ pkgTest <- function(x) {
   }
 }
 
-packages <- c('data.table',
-              'viridis','epiDisplay','devtools',
+packages <- c('data.table','tidyverse','sf','readxl','USAboundaries',
+              'viridis','epiDisplay',
               'ggmap','ggplot2','ggpubr','cowplot',
               'rnaturalearth','rnaturalearthdata',
               'maps','mapview')
@@ -32,27 +32,43 @@ lapply(packages, pkgTest)
 ####################################################
 
 ## SET WORKING DIRECTORY
-setwd("C:\\Users\\bparthum\\Environmental Protection Agency (EPA)\\Moore, Chris - Climate benefits of nutrient management\\analysis")
+local_path <- Sys.getenv("USERPROFILE")
+setwd(paste0(local_path,"\\Environmental Protection Agency (EPA)\\Moore, Chris - Climate benefits of nutrient management\\climateBenefits_bryan\\climateBenefits"))
+# setwd(paste0(here(),'/iwg_2021'))
+
 
 ####################################################
 ##############################################  DATA
 ####################################################
 
-localPath <- Sys.getenv("USERPROFILE")
-source("climateBenefits_jb\\scripts\\masterLibrary.R")
-source("climateBenefits_jb\\scripts\\ghgFunctions.R")
-source("climateBenefits_jb\\scripts\\setDirectory.R")
-source("climateBenefits_jb\\scripts\\readData.R")
-source("climateBenefits_jb\\scripts\\simulateGhg.R")
+# source("scripts\\masterLibrary.R")
+# source("climateBenefits_jb\\scripts\\ghgFunctions.R")
+# source("climateBenefits_jb\\scripts\\setDirectory.R")
+# source("climateBenefits_jb\\scripts\\readData.R")
+# source("climateBenefits_jb\\scripts\\simulateGhg.R")
 
 milstead_lakes <- st_read("store\\MRB_shapes\\MRB1_WBIDLakes.shp")
 head(milstead_lakes)
+
+chesDat <- read_excel("store/ChesLakeLoadsConc.xlsx",
+                      sheet = "ChesLakeConc")
+head(chesDat)
+
+nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
+                 layer = "NHDWaterbody") %>%
+  dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
+                GNIS_ID, GNIS_NAME, AREASQKM, 
+                ELEVATION, REACHCODE, FTYPE, FCODE,
+                ONOFFNET, PurpCode, PurpDesc,
+                MeanDepth, LakeVolume, MaxDepth, MeanDUsed, MeanDCode) # lakeMorpho data
+head(nhdSf)
 
 ####################################################
 #####################################  MISSING LAKES
 ####################################################
 
 chesDat_not_in_ndh <- chesDat %>% filter(!(WB_ID %in% nhdSf$COMID)) # 25 waterbodies not in NHD
+head(chesDat_not_in_ndh)
 
 milstead_not_in_ndh <- milstead_lakes %>% filter(!(WB_ID %in% nhdSf$COMID)) # 296 waterbodies not in NHD
 
@@ -93,6 +109,17 @@ ggsave('output\\chesData_and_NHD.png',plot_dat.sf)
 
 map_chesData_and_NHD <- mapview(dat.sf, zcol = "WB_ID", legend = T, layer.name='WB_ID', alpha.regions = 0.3, aplha = 1)
 mapshot(map_chesData_and_NHD, url = "maps/chesData_and_NHD.html")
+
+
+###################################################
+###########################  IDENTIFY MISSING LAKES
+###################################################
+## WHERE ARE THE MISSING LAKES FROM MILSTEAD AND CHESAPEAKE 
+
+states2 <- st_transform(states,st_crs(nhdSf)) 
+nhd_in_region <- st_intersection(nhdSf,states2)
+map_nhd <- mapview(nhdSf, zcol = "COMID", legend = F, alpha.regions = 0.3, aplha = 1)
+mapshot(map_nhd, url = "maps/nhd_lakes.html")
 
 
 # ###################################################
