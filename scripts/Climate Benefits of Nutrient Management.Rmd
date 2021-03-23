@@ -22,10 +22,14 @@ library(tidyverse) # dplyr, ggplot2,...
 library(scales)
 library(readxl) # read excel file readData.R
 library(sf) # spatial data
-library(USAboundaries) # for map in readData.R
+library(USAboundaries) # for states map in Methods section
+library(maps) # county map in 'Plots of total emission reductions per county'
 library(kableExtra) # nice tables
 library(MASS)
 library(magrittr)
+library(tigris) # county level data
+library(cowplot) # multiple plots per page
+library(ggiraph) # interactive county level plots
 
 # Define local path for each user.  Will enable reading data from 
 # 'Climate benefits of nutrient management' OneDrive folder maintained by Chris Moore
@@ -115,12 +119,18 @@ dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
 dat.sf <- dat.sf %>% dplyr::filter(!is.na(AREASQKM))# remove rows without area, corrupts ice extent calcs below
 dim(dat.sf) #4222, missing area deleted
 
-dat <- as_tibble(dat.sf) # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
+dat <- sf::st_drop_geometry(dat.sf) %>% as_tibble() # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
 ```
 
 ```{r fig.cap = "Location of 4,222 waterbodies in Chesapeake Bay Watershed model"}
 # read in chesapeake bay watershed boundary
+# https://data-chesbay.opendata.arcgis.com/search?categories=boundaries
 wsb <- st_read("maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp")
+
+# read in chesapeake bay boundary
+# https://data-chesbay.opendata.arcgis.com/search?categories=boundaries
+
+cbb <- st_read("maps/Chesapeake_Bay_Shoreline_Medium_Resolution.shp")
 
 # Map to make sure we are in correct region.
 states <- us_states() %>% # get states map
@@ -129,9 +139,10 @@ states <- us_states() %>% # get states map
 
 # Make a quick map.
 # This seems about right.
-ggplot(states) +
-      geom_sf(data = wsb) +
-  geom_sf(fill = NA) +
+ggplot() +
+  geom_sf(data = states) +
+      geom_sf(data = wsb, fill = "light blue") +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
   geom_sf(data = dat.sf) +
   coord_sf(crs = st_crs(5070)) # change to albers for plotting
 
@@ -340,14 +351,14 @@ dim(dat) # 4222
 
 Ice cover effectively eliminates the exchange of gases between lakes and the atmosphere; therefore GHG emission rates are 0 during periods of ice cover.  Duration of ice cover during the winter of 2019 - 2020 was downloaded from the ERA-5 Land data set (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land?tab=overview) and spatially joined to the centroid of the NHD polygon for each waterbody in the watershed. Total days of ice cover range from `r min(lakeCtr.i$day.of.ice, na.rm = TRUE)` to `r max(lakeCtr.i$day.of.ice, na.rm = TRUE)`, with lakes in the northern portion of the watershed experiencing longer ice-cover duration than those in the south.
 
-```{r message = FALSE, fig.cap = "Ice cover duration during the 2019-2020 winter for waterbodies in Chesapeake Bay Watershed model"}
+```{r message = FALSE, fig.cap = "Ice cover duration during the 2010-2020 winter for waterbodies in Chesapeake Bay Watershed model"}
 ggplot(states) +
       geom_sf(data = wsb) + # 
   geom_sf(fill = NA) +
   geom_sf(data = iceCover, aes(color = day_of_ice_filled)) +
   coord_sf(crs = st_crs(5070)) # change to albers for plotting
 
-ggsave("output/figures/iceCover.tiff")
+# ggsave("output/figures/iceCover.tiff")
 
 ```
 
@@ -606,6 +617,7 @@ dat <- dat %>%
                               interval = "confidence")[,3] %>%
            pN2o(.)) # function to convert to mg n2o m-2 d-1
 
+
 dat[1:5,] %>% dplyr::select(WB_ID, contains("n2o")) %>%
   kbl(caption = "Mean, lower 2.5 percentile, and upper 97.5 percentile N2O emission rate (mg N2O m-2 day-1) for five waterbodies under the '2010' and 'TMDLnew' scenarios.") %>%
   kable_classic()
@@ -677,11 +689,11 @@ dat[1:5, ] %>% dplyr::select(WB_ID, matches("ch4.*lk.d")) %>%
 
 ```
 
-### Upscale daily emissions to annual emissions
+### Upscale daily emissions to annual emissions (mg GHG year^-1^)
 The models used to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) are based on published measurements, most of which were made during the warm summer months when emission rates are expected to be greatest.  We therefore assume the predicted areal emission rates are constant during the open-water season.  During periods of ice cover (see above) areal emission rates are zero.  
 
 ```{r}
-dat <- dat %>%
+dat.yr <- dat %>%
   dplyr::select(WB_ID, day_of_ice_filled, contains("lk.d")) %>%
   mutate_at(vars(-WB_ID, -day_of_ice_filled), function(x) x * (365 - .$day_of_ice_filled)) %>% # ice cover duration winter 2019-2020
   rename_at(vars(-WB_ID, -day_of_ice_filled), function(x) gsub(".d", ".yr", x))
@@ -692,7 +704,7 @@ dat <- dat %>%
 We can now sum the total annual emissions (metric tons of GHG) across all waterbodies and both scenarios.
 
 ```{r}
-dat.sum <- dat %>% 
+dat.sum <- dat.yr %>% 
   dplyr::select(contains("lk.yr")) %>%
  summarize_all(sum, na.rm = TRUE) %>%
   mutate_all(~. / (1000*1000*1000)) %>% # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg)
@@ -857,7 +869,7 @@ preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes$`dat_tmdl 
 # this generates a winter emission rate for each lake based on the mean and sd
 # reported in Waldo et al.  Each lake will have a different winter rate, but 
 # the same rate will be used for 2010 and tmdl scenarios
-ch4.winter <- rnorm(n = nrow(lakes), mean = 14.4, sd = 16.56) # mg CH4 m-2 d-1
+ch4.winter <- rnorm(n = nrow(lakes), mean = 10.56, sd = 11.52) # mg CH4 m-2 d-1
 
 
 #################################
@@ -1040,3 +1052,557 @@ kr_simulations %>%
    add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
   kable_classic()
 ```
+
+
+
+# Publication Figures
+## Set up temporary plotting data
+```{r eval = FALSE}
+# Using emission rate values from my code, rather than final code produced by Bryan.  This will suffice as
+# we sketch out possible figures.  After we arrive on final figures, I'll update with data from Bryan's code.
+
+# PLOTTING CAN BE DONE WITH ACTUAL LAKE POLYGONS OR BY REPRESENTING EACH LAKE AS A POINT
+# Create data object for plotting lake polygon
+# merge data object with NHD to create polygon sf object
+dat.poly <- merge(dplyr::select(nhdSf, COMID), dat, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all chesDat observations
+  mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
+  dplyr::select(-COMID) # remove residual COMID column
+  
+dim(dat.poly) # 4222
+plot(dat.poly$geometry) #test, looks good
+
+# Now create object for plotting points
+dat.pt <- st_centroid(dat.poly)
+plot(dat.pt$geometry)
+```
+
+
+## Plots of ice cover, chl, TP, and GHG emission rate: polygon plots
+```{r eval = FALSE}
+# FIGURE OF INPUTS AND OUTPUTS FOR BASELINE
+# Polygon plot--------
+# can add line below to ggplot to project to Albers for mapping, but I think looks better
+# + coord_sf(crs = st_crs(5070)) # change to albers for plotting
+st_crs(states) # 4326 (WGS84)
+
+# ice days figure
+p1 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = dat.poly, aes(color = day_of_ice_filled)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+    labs(color = "Ice cover duration (days)") + 
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# chl figure
+p2 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = dat.poly, aes(color = Chla2010)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "ChlA") + 
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# TP figure
+p3 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = dat.poly, aes(color = Pvv2010)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "TP (mg/L)") + 
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# CH4 figure
+p4 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = dat.poly, aes(color = ch42010)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "CH4 (mg m-2 d-1)") + 
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# CO2 figure
+p5 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = dat.poly, aes(color = co22010)) + 
+    geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "CO2 (mg m-2 d-1)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# N2O figure
+p6 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = dat.poly, aes(color = n2o2010)) + 
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "N2O (mg m-2 d-1)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+cowplot::plot_grid(p1, p2, p3, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
+
+ggsave(file = "figures/poly.tiff", width = 15, height = 8, units = "in")
+       
+       
+```
+
+
+## Plots of ice cover, chl, TP, and GHG emission rate: point plots
+```{r eval = FALSE}
+# Point plot-------------------
+# Extreme values causing wide range of color ramp which hides spatial pattern
+# Play with removing extremes
+# these extreme values come from the same site.  Makes sense since chl is calculated from P.
+# consider chl > 0.2 as extreme value.
+ggplot(dat.pt, aes(Chla2010, Pvv2010)) + geom_point() + scale_y_log10() + scale_x_log10()
+
+# where are these extreme values located?
+ ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 > 0.2)) 
+
+
+# ice days figure
+p1 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = dat.pt, aes(color = day_of_ice_filled, 
+                             size = AREASQKM)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+    labs(color = "Ice cover duration (days)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+  
+# chl figure 
+# better without extreme values
+p2 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2),
+          aes(color = Chla2010)) + #, size = AREASQKM))
+   geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "ChlA") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# TP figure
+p3 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = Pvv2010, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "TP (mg/L)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1)) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# CH4 figure
+p4 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = ch42010, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CH4 (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# CO2 figure
+p5 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = co22010, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CO2 (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# N2O figure
+p6 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = n2o2010, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "N2O (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+cowplot::plot_grid(p1, p2, p3, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
+
+ggsave(file = "figures/point.tiff", width = 15, height = 8, units = "in")
+```
+
+
+## Plots of difference in emission rates: 2010 - tmdl: point plots
+```{r eval = FALSE}
+# first, lets add new fields to the data object
+dat.pt <- dat.pt %>% mutate(ch4diff = ch42010 - ch4TMDLnew,
+                            co2diff = co22010 - co2TMDLnew,
+                            n2odiff = n2o2010 - n2oTMDLnew)
+
+# lets make sure the diff values make sense
+# there appear to be some extreme values that might obscure
+# interesting spatial patterns in the data. 
+dat.pt %>% sf::st_drop_geometry(.) %>%
+  dplyr::select(contains("diff")) %>%
+  lapply(., function(x) summary(x))
+
+# lets look at distribution of values
+# normal distribution with extremely long tails.
+dat.pt %>% sf::st_drop_geometry(.) %>%
+  dplyr::select(contains("diff")) %>%
+  pivot_longer(everything()) %>%
+  ggplot(., aes(value)) + 
+  geom_density() +
+  facet_wrap(~name, scales = "free")
+
+# closer inspection of negative values
+# 75 cases where chl a increases under TMDL, increasing CH4 and N2O, and often CO2
+# the cases with crazy increases in chl and ch4 had very high initial chl values (122 and 720)
+# maybe we want to omit extreme values from plots
+dat.pt %>% sf::st_drop_geometry(.) %>%
+  filter(ch4diff < 0) %>%
+  dplyr::select(matches("TMDLnew|2010|diff")) %>%
+  dplyr::select(!matches("upr|lwr|in|out|Nvv")) %>%
+  mutate(across(contains("Chla"), ~.x*1000)) %>% # convert to ug/L for convenience
+  mutate(across(contains("Chla"), ~round(.x, 3)))
+
+# map of increased chl under TMDL, a few clusters of sites
+ggplot(states) +
+  geom_sf(data = wsb) + # 
+  geom_sf(fill = NA) +
+  geom_sf(data = filter(dat.pt, ChlaDiff < 0))
+
+
+# Point plot-------------------
+# chl figure 
+# better without extreme values
+p2 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2),
+          aes(color = ChlaDiff)) + #, size = AREASQKM))
+   geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "ChlA reduction (mg/L)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# TP figure
+p3 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = PvvDiff, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(color = "TP reduction (mg/L)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# CH4 figure
+p4 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = ch4diff, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CH4 reduction (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# CO2 figure
+p5 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = co2diff, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CO2 reduction (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+# N2O figure
+p6 <- ggplot() +
+  geom_sf(data = wsb) + 
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2), aes(color = n2odiff, size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "white", size = NA) + 
+  labs(color = "N2O reduction (mg m-2 d-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+cowplot::plot_grid(p2, p3, NULL, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
+
+ggsave(file = "figures/pointDiff.tiff", width = 15, height = 8, units = "in")
+
+
+
+```
+
+
+## Plots of difference in emission rates: 2010 - tmdl: point plots, green ramp
+```{r eval = FALSE}
+# Point plot-------------------
+# chl figure 
+# better without extreme values
+p2.col <- p2 + scale_color_gradientn(colors = rainbow(5))
+p3.col <- p3 + scale_color_gradientn(colors = rainbow(5))
+p4.col <- p4 + scale_color_gradientn(colors = rainbow(5))
+p5.col <- p5 + scale_color_gradientn(colors = rainbow(5))
+p6.col <- p6 + scale_color_gradientn(colors = rainbow(5))
+
+
+g <- gridExtra::grid.arrange(p2.col, p3.col, p4.col, p5.col, p6.col, ncol = 3, nrow = 2)
+
+ggsave(file = "figures/pointDiffRainbow.tiff", g, width = 15, height = 8, units = "in")
+
+```
+
+
+## Plots of total emission reductions per lake
+```{r eval = FALSE}
+# convert object containing annual data to sf object
+dat.yr.sf <- merge(nhdSf, dat.yr, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) %>% # retain all dat.yr observations
+  mutate(WB_ID = as.character(COMID)) %>% # restore WB_ID column for consistency with original data.  convert to character for plotting
+  dplyr::select(-COMID) # remove residual COMID column
+
+# convert to point for plotting
+dat.yr.sf <- st_centroid(dat.yr.sf)
+
+
+# CH4
+p1 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = dat.yr.sf, aes(color = ch42010.lk.yr - ch4TMDLnew.lk.yr, #
+                                size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CH4 reduction\n (mg year-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# CO2
+p2 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = dat.yr.sf, aes(color = co22010.lk.yr - co2TMDLnew.lk.yr, #
+                                size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "CO2 reduction\n (mg year-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# N2O
+p3 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = dat.yr.sf, aes(color = n2o2010.lk.yr - n2oTMDLnew.lk.yr, #
+                                size = AREASQKM)) +
+   geom_sf(data = cbb, fill = "blue", size = NA) + 
+  labs(color = "N2O reduction\n (mg year-1)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+
+cowplot::plot_grid(p1, p2, p3, ncol = 3, nrow = 1, align = "h")
+
+ggsave(file = "figures/pointIncremental.tiff", width = 15, height = 5, units = "in")
+```
+
+## Plots of total emission reductions per county
+```{r eval = FALSE}
+cnty.us.tigris <- tigris::counties(state = c("Virginia", "Maryland", "Delaware",
+                     "West Virginia", "Pennsylvania", "New York")) %>%
+  st_transform(crs = st_crs(wsb))
+st_crs(cnty.us.tigris) # 4326, WGS84
+
+st_crs(cnty.us.tigris) == st_crs(wsb) #TRUE
+
+# clip county to Chesapeake watershed
+cnty <- sf::st_intersection(x = cnty.us.tigris, y = wsb) # not working
+st_crs(cnty)
+
+# add county info to points
+# but, first, add chl and TP to points
+dat.yr.sf <- merge(dat.yr.sf, 
+                   dplyr::select(chesDat, WB_ID, Pvv2010, Chla2010)) # naive merge on WB_ID
+
+# need to project cnty to dat.pt
+cnty <- st_transform(cnty, crs = st_crs(dat.yr.sf))
+dat.yr.sf <- sf::st_intersection(x = dat.yr.sf, y = cnty) # this adds cty to points
+
+# calculate increment by lake
+dat.yr.sf <- dat.yr.sf %>%
+  mutate(ch42010.lk.yr.diff = ch42010.lk.yr - ch4TMDLnew.lk.yr,
+         co22010.lk.yr.diff = co22010.lk.yr - co2TMDLnew.lk.yr,
+         n2o2010.lk.yr.diff = n2o2010.lk.yr - n2oTMDLnew.lk.yr)
+
+# aggregate incremental emissions and lake area by county
+dat.yr.sf.agg <- dat.yr.sf %>%
+  group_by(STATEFP, COUNTYFP) %>% # unique cnty within state
+  summarise(across(matches("diff|AREASQKM"), sum),
+            meanTP = mean(Pvv2010),
+            meanChla = mean(Chla2010))
+
+ggplot(dat.yr.sf.agg) + geom_point(aes(AREASQKM, ch42010.lk.yr.diff))
+
+# now add aggregated incremental change to cnty attributes
+cnty.increment <- merge(cnty, dat.yr.sf.agg %>% sf::st_drop_geometry())
+
+# convert units to metric tons
+cnty.increment <- cnty.increment %>%
+  mutate(across(contains(".lk.yr"), ~ . / (1000*1000*1000))) %>% # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg)
+  dplyr::rename_with(.cols = contains(".lk.yr"), .fn = ~ paste0(.x, ".mt"))
+  
+
+
+
+# lake area by cnty
+p1 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = cnty.increment, aes(fill = AREASQKM)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(fill = "lake area (km2)") +
+  theme(legend.position = "top",
+        panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+
+# # mean TP by cnty
+# p1 <- ggplot() +
+#   geom_sf(data = wsb) + # 
+#   geom_sf(data = cnty.increment, aes(fill = meanTP)) +
+#   geom_sf(data = cbb, fill = "blue", size = NA) +
+#   labs(fill = "mean TP (mg/L)") +
+#   theme(legend.position = "top")
+# 
+# # lake chla by cnty
+# p1 <- ggplot() +
+#   geom_sf(data = wsb) + # 
+#   geom_sf(data = cnty.increment, aes(fill = meanChla)) +
+#   geom_sf(data = cbb, fill = "blue", size = NA) +
+#   labs(fill = "mean Chla (mg/L)") +
+#   theme(legend.position = "top")
+
+
+# CH4 reductions
+p2 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = cnty.increment, aes(fill = ch42010.lk.yr.diff.mt)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(fill = "CH4 reduction (mt year-1)") +
+  theme(legend.position = "top",
+        panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+  
+
+# CO2 reductions
+p3 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = cnty.increment, aes(fill = co22010.lk.yr.diff.mt)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(fill = "CO2 reduction (mt year-1)") +
+  theme(legend.position = "top",
+        panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+  
+
+# N2O reductions
+p4 <- ggplot() +
+  geom_sf(data = wsb) + # 
+  geom_sf(data = cnty.increment, aes(fill = n2o2010.lk.yr.diff.mt)) +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  labs(fill = "N2O reduction (mt year-1)") +
+  theme(legend.position = "top",
+        panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1))
+ 
+
+g <- gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 4, nrow = 1)
+
+ggsave(file = "figures/cntyIncremental.tiff", g, width = 15, height = 6, units = "in")
+
+
+# Use interactive plot to identify counties with large incremental reductions
+
+
+
+
+gg <- ggplot(cnty.increment) +
+  geom_sf_interactive(aes(fill = ch42010.lk.yr.diff.mt, tooltip = GEOID, data_id = GEOID))
+ggiraph::girafe(ggobj = gg)
+
+dat.yr.sf %>% filter(ALAND == 2305001140)
+
+```
+
+
+## CDF plots of emission rates
+```{r eval = FALSE}
+# CDF PRE AND POST-----------------------
+dat.long <- dat.pt %>% st_drop_geometry() %>% 
+  dplyr::select(Chla2010, ChlaTMDLnew, 
+                              Pvv2010, PvvTMDLnew, 
+                              ch42010, ch4TMDLnew,
+                              co22010, co2TMDLnew,
+                              n2o2010, n2oTMDLnew) %>%
+  pivot_longer(cols = everything())
+
+p1 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name), value < 0.2), aes(value, color = name)) + 
+  stat_ecdf(geom="step") +
+  ggtitle("Chlorophyll") +
+  ylab("Cumulative Percent") +
+  theme(legend.position = c(0.8, 0.4),
+        legend.title = element_blank())
+
+p2 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name), value < 0.5), aes(value, color = name)) + 
+  stat_ecdf(geom="step") +
+  ggtitle("total phosphorus") +
+  theme(axis.title.y = element_blank(),
+        legend.position = "none")
+
+p3 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "ch4", x = name), value < 750), aes(value, color = name)) + 
+  stat_ecdf(geom="step") +
+  ggtitle("CH4 emission rate") +
+  ylab("Cumulative Percent") +
+  theme(legend.position = "none")
+
+p4 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "co2", x = name), value < 5000), aes(value, color = name)) + 
+  stat_ecdf(geom="step") +
+  ggtitle("CO2 emission rate") +
+  theme(axis.title.y = element_blank(),
+        legend.position = "none")  
+
+p5 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "n2o", x = name), value < 0.75), aes(value, color = name)) + 
+  stat_ecdf(geom="step") +
+  ggtitle("N2O emission rate") +
+  theme(axis.title.y = element_blank(),
+        legend.position = "none")
+
+g <- gridExtra::grid.arrange(gridExtra::arrangeGrob(p1, p2, ncol = 3),
+                             gridExtra::arrangeGrob(p3, p4, p5, ncol = 3),
+                             nrow = 2)
+
+ggsave(file = "figures/cdf.tiff", g, width = 12, height = 8, units = "in")
+
+```
+
+
