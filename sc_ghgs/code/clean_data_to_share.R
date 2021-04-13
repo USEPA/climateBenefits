@@ -1,5 +1,9 @@
 ## Written by: US EPA National Center for Environmental Economics
 
+###############################################################################
+###########################    Summary Statistics   ###########################
+###############################################################################
+
 ##########################
 #################  LIBRARY
 ##########################
@@ -29,87 +33,68 @@ lapply(packages, pkgTest)
 setwd(here())
 
 ## List of gases
-gas_list <- c('CO2','N2O','CH4')
-discount_rates <- c('2%','3%')
+gas_list <- c('co2','n2o','ch4')
+discount_rates <- c('1.5%','2%','2.5%','3%','5%','95th Pct at 3.0%')
 
 ##########################
-##############  START LOOP
+##################  tables
 ##########################
 
 for (thisgas in gas_list) {
 
-##########################
-##############  READ DATA
-##########################
-
-data <- read_csv(paste0("data\\",thisgas,".csv")) %>% 
+table <- read_csv(paste0(getwd(),"\\sc_ghgs\\data\\",thisgas,"_table.csv")) %>% 
                  filter(geography=="Global" & discount_rate %in% discount_rates) %>% 
-                 select(!geography)
-
-####################################################
-###################################  all_mc_runs.csv
-####################################################
-
-
-####################################################
-##############################  annual_unrounded.csv
-####################################################
-
-means <- data %>%
-         group_by(year,discount_rate,gas) %>% 
-         summarize(mean = mean(estimate,na.rm=TRUE))
-
-## HIGH-IMPACT 95th percentile of each model
-high_impact <- data %>% 
-  filter(discount_rate=='3%') %>%
-  group_by(year,gas) %>%
-  summarize(mean = quantile(estimate, 0.95, na.rm=TRUE)) %>%
-  mutate(discount_rate = '3% 95th Pct.')
-
-table <- rbind(means,high_impact)
+                 select(!geography) %>%
+                 mutate(gas = toupper(thisgas))
 
 assign(paste0("table_", thisgas), table)
 }
 
-sc_ghg_table <- rbind(table_CO2,table_N2O,table_CH4)
+table_co2 <- read_csv(paste0(getwd(),"\\sc_ghgs\\data\\co2_table_ignore_discontinuities_co2.csv")) %>% 
+              filter(geography=="Global" & discount_rate %in% discount_rates) %>% 
+              select(!geography) %>%
+              mutate(gas = toupper('co2'))
 
+table <- rbind(table_co2,table_n2o,table_ch4) %>% 
+          mutate(se=ifelse(discount_rate=='95th Pct at 3.0%',0,se))
 
 # create sequence of dates
-annual <- data.frame(year = rep(seq(2020,2060,1),12),
-                     discount_rate = c(rep('2.5%',41),rep('3%',41),rep('5%',41),rep('3% 95th Pct.',41)),
-                     gas  = c(rep('CO2',164),rep('N2O',164),rep('CH4',164))) 
+annual <- data.frame(year = rep(seq(2020,2060,1),18),
+                     discount_rate = c(rep('1.5%',41),rep('2%',41),rep('2.5%',41),rep('3%',41),rep('5%',41),rep('95th Pct at 3.0%',41)),
+                     gas  = c(rep('CO2',246),rep('N2O',246),rep('CH4',246))) 
 
 # create sequence of dates
-five_year <- data.frame(year = rep(seq(2020,2060,5),12),
-                        discount_rate = c(rep('2.5%',9),rep('3%',9),rep('5%',9),rep('3% 95th Pct.',9)),
-                        gas  = c(rep('CO2',36),rep('N2O',36),rep('CH4',36))) 
+five_year <- data.frame(year = rep(seq(2020,2060,5),18),
+                        discount_rate = c(rep('1.5%',9),rep('2%',9),rep('2.5%',9),rep('3%',9),rep('5%',9),rep('95th Pct at 3.0%',9)),
+                        gas  = c(rep('CO2',54),rep('N2O',54),rep('CH4',54))) 
 
 # merge
-annual_unrounded <- merge(annual,sc_ghg_table,all=TRUE) %>% 
-  arrange(gas,discount_rate,year) %>%
-  group_by(gas,discount_rate) %>%
-  mutate(mean = na.approx(mean)) 
+annual_unrounded <- merge(annual,table,all=TRUE) %>%
+                    arrange(gas,discount_rate,year) %>%
+                    group_by(gas,discount_rate) %>%
+                    mutate(mean = na.approx(mean),
+                           se = na.approx(se)) 
 
 # merge
-five_year_unrounded <- merge(five_year,sc_ghg_table,all=TRUE) %>% 
-  arrange(gas,discount_rate,year) %>%
-  group_by(gas,discount_rate) %>%
-  mutate(mean = na.approx(mean))
-
+five_year_unrounded <- merge(five_year,table,all=TRUE) %>% 
+                       arrange(gas,discount_rate,year) %>%
+                       group_by(gas,discount_rate) %>%
+                       mutate(mean = na.approx(mean),
+                              se = na.approx(se))
 
 ## reshape and export to excel
-annual_w <- annual_unrounded %>% 
-  pivot_wider(names_from = c(discount_rate,gas), values_from = mean)
+annual_w <- annual_unrounded %>% select(!se) %>% 
+            pivot_wider(names_from = c(discount_rate,gas), values_from = mean)
 
-five_year_w <- five_year_unrounded %>% 
-  pivot_wider(names_from = c(discount_rate,gas), values_from = mean) 
+five_year_w <- five_year_unrounded %>% select(!se) %>% 
+               pivot_wider(names_from = c(discount_rate,gas), values_from = mean) 
 
 ##########################
 ####################  SAVE
 ##########################
 
-write_excel_csv(annual_w, "data\\sc_ghg_annual_unrounded.csv")
-write_excel_csv(five_year_w, "data\\sc_ghg_five_year_unrounded.csv")
+write_excel_csv(annual_w, "sc_ghgs\\data\\scghg_annual_unrounded_ignore_pageco2_discontinuities.csv")
+write_excel_csv(five_year_w, "sc_ghgs\\data\\scghg_five_year_unrounded_ignore_pageco2_discontinuities.csv")
 
 
 ## END OF SCRIPT. Have a great day!
