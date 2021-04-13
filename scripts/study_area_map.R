@@ -25,7 +25,7 @@ packages <- c('data.table','tidyverse','sf','readxl','USAboundaries',
               'viridis','epiDisplay',
               'ggmap','ggplot2','ggpubr','cowplot',
               'rnaturalearth','rnaturalearthdata',
-              'maps','mapview','here','rcartocolor','ggsn')
+              'maps','mapview','here','rcartocolor','ggsn','extrafont')
 lapply(packages, pkgTest)
 
 ####################################################
@@ -36,21 +36,26 @@ lapply(packages, pkgTest)
 setwd(here())
 
 ## google
-register_google(key = "AIzaSyAdJyWfjL0dJUK2L7YmbDLSBrxMea5qVpo")
+# register_google(key = "",write = TRUE)
 
 ####################################################
 ##############################################  DATA
 ####################################################
 
 watershed <- st_read('maps\\chesapeakeBayWatershed\\Chesapeake_Bay_Watershed_Boundary.shp')
-watershed %>% 
-  ggplot() +
-  geom_sf() + theme_void()
+# watershed %>% 
+#   ggplot() +
+#   geom_sf() + theme_void()
+
+lakes <- st_read('store\\study_lakes\\study_lakes.shp')
+# lakes %>% 
+#   ggplot() +
+#   geom_sf() + theme_void()
 
 shoreline <- st_read('maps\\Chesapeake_Bay_Shoreline_Medium_Resolution.shp')
-shoreline %>% 
-  ggplot() +
-  geom_sf() + theme_void()
+# shoreline %>% 
+#   ggplot() +
+#   geom_sf() + theme_void()
 
 states <- st_as_sf(us_states() %>%
                      filter(name %in% c("Virginia", "Maryland", "Delaware",
@@ -65,7 +70,7 @@ us_states = subset(us_states(),
                                 "Puerto Rico",
                                 "Alaska",
                                 "Hawaii")) %>%
-              st_transform(crs = st_crs(2163))
+              st_transform(crs = st_crs(5070))
 
 ####################################################
 ########################################  PLOT PARTS
@@ -82,11 +87,14 @@ region <- ggplot() +
 ##############################################  PLOT
 ####################################################
 
-study_area <- ggplot() +
+# study_area <- 
+  
+  ggplot() +
   geom_sf(data=states,color='black',aes(fill=name),alpha=0.05) + 
   geom_sf(data=watershed,fill='#9DBF9E',alpha=0.4) + 
   geom_sf(data=shoreline,fill='white') + 
-  geom_sf_text(data=states, aes(label=stusps)) +
+  geom_sf(data=lakes,color='deepskyblue2',fill='deepskyblue2') + 
+  geom_sf_text(data=states, aes(label=stusps),family="Source Sans Pro ExtraLight") +
   scale_fill_carto_d(type ="diverging", palette="Earth") +
   theme_void() + 
   guides(fill=F) + 

@@ -119,6 +119,8 @@ dat.sf %>% filter(is.na(AREASQKM)) %>% nrow() # just the 25 identified above
 dat.sf <- dat.sf %>% dplyr::filter(!is.na(AREASQKM))# remove rows without area, corrupts ice extent calcs below
 dim(dat.sf) #4222, missing area deleted
 
+st_write(dat.sf, 'store\\study_lakes\\study_lakes.shp') ## export lake polys
+
 dat <- sf::st_drop_geometry(dat.sf) %>% as_tibble() # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
 ```
 
