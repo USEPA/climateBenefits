@@ -42,12 +42,12 @@ setwd(here())
 ##############################################  DATA
 ####################################################
 
-watershed <- st_read('maps\\chesapeakeBayWatershed\\Chesapeake_Bay_Watershed_Boundary.shp')
+watershed <- st_read('maps\\chesapeakeBayWatershed\\Chesapeake_Bay_Watershed_Boundary.shp') %>% mutate(aes = 'Chesapeake Bay\nWatershed')
 # watershed %>% 
 #   ggplot() +
 #   geom_sf() + theme_void()
 
-lakes <- st_read('store\\study_lakes\\study_lakes.shp')
+lakes <- st_read('store\\study_lakes\\study_lakes.shp') %>% mutate(aes = 'Waterbodies')
 # lakes %>% 
 #   ggplot() +
 #   geom_sf() + theme_void()
@@ -87,18 +87,20 @@ region <- ggplot() +
 ##############################################  PLOT
 ####################################################
 
-# study_area <- 
-  
-  ggplot() +
-  geom_sf(data=states,color='black',aes(fill=name),alpha=0.05) + 
-  geom_sf(data=watershed,fill='#9DBF9E',alpha=0.4) + 
+study_area <- ggplot() +
+  geom_sf(data=states,color='black',alpha=0.05) + 
+  geom_sf(data=watershed,aes(fill=aes),alpha=0.4) + 
   geom_sf(data=shoreline,fill='white') + 
-  geom_sf(data=lakes,color='deepskyblue2',fill='deepskyblue2') + 
-  geom_sf_text(data=states, aes(label=stusps),family="Source Sans Pro ExtraLight") +
-  scale_fill_carto_d(type ="diverging", palette="Earth") +
-  theme_void() + 
-  guides(fill=F) + 
-  north(data=states,location="topright") + scalebar(data=states,location="bottomright",transform=T,dist=50,dist_unit="mi")
+  geom_sf(data=lakes,color='deepskyblue2',aes(fill=aes)) + 
+  geom_sf_text(data=states, aes(label=stusps)) +
+  scale_fill_manual(values=c("#9DBF9E",'deepskyblue2')) +
+  # scale_color_carto_d(type ="diverging", palette="Earth") +
+  theme_void() +
+  north(data=states,location="topright") + 
+  scalebar(data=states,location="bottomright",transform=T,dist=50,dist_unit="mi") +
+  labs(fill='') +
+  theme(legend.position = c(0.89, 0.3),
+        legend.key = element_rect(color=NA))
   
 plot <- ggdraw() +
   draw_plot(study_area) +
