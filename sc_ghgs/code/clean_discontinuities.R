@@ -26,18 +26,20 @@ lapply(packages, pkgTest)
 ##########################
 
 ## Set working directory
-setwd(here())
+setwd(paste0(here(),'\\sc_ghgs'))
 
 ## List of gases
-gas_list <- c('CO2','N2O','CH4')
+gas_list <- c('co2','n2o','ch4')
 
 ##########################
 ##############  START LOOP
 ##########################
 
 for (thisgas in gas_list) {
-  
-page_dir    <- paste0("data\\",thisgas,"\\page\\discontinuity_mismatch")            # location of file group
+
+disc_dir <- list.dirs(path=paste0(getwd(),'\\data\\',thisgas,'\\page'),full.names = FALSE, recursive = TRUE) %>%
+            str_subset(., 'discontinuity_mismatch')
+page_dir    <- paste0(getwd(),"\\data\\",thisgas,'\\page\\',disc_dir)                                # location of file group
 page_files  <- fs::dir_ls(page_dir, regexp = "\\.csv$")                         # create list of .csv files
 page        <- page_files %>% 
                   map_dfr(read_csv, .id = "source") %>%                         # read in files (map), turn into data frame (df), and row bind (r)
@@ -47,7 +49,7 @@ page        <- page_files %>%
 ###################  CLEAN
 ##########################
 
-page %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/page/discontinuity_mismatch/"))) %>%
+page %<>% mutate(source = gsub(".*/discontinuity_mismatch/","",source)) %>%
           mutate(source = str_remove(source,".csv")) %>%
           separate(source, c("scenario","discount_rate"), " ") %>%
           mutate(scenario = case_when(scenario=="USG1" ~ "IMAGE",
@@ -62,13 +64,14 @@ page %<>% mutate(source = str_remove(source,paste0("data/",thisgas,"/page/discon
 ## WIDE TO LONG
 years <-  paste(seq(2020,2060,5), sep=", ") # vector of years
 page %<>% gather(year,discontinuity,all_of(years)) %>%
-          mutate(model = 'PAGE 2009')
+          mutate(model = 'PAGE 2009',
+                 gas = thisgas)
 
 ##########################
 ####################  SAVE
 ##########################
 
-write_csv(page, paste0("data\\",thisgas,"_page_discontinuity.csv"))
+write_csv(page, paste0(getwd(),"\\data\\",thisgas,"\\page\\",thisgas,"_discontinuity.csv"))
 
 }
 
