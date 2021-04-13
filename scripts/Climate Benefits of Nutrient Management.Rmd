@@ -1258,6 +1258,7 @@ ggsave(file = "figures/point.tiff", width = 15, height = 8, units = "in")
 dat.pt <- dat.pt %>% mutate(ch4diff = ch42010 - ch4TMDLnew,
                             co2diff = co22010 - co2TMDLnew,
                             n2odiff = n2o2010 - n2oTMDLnew)
+st_write(dat.pt, 'store\\results\\results.shp') ## export lake polys
 
 st_write(dat.pt, 'store\\results\\results.shp') ## export lake polys
 
