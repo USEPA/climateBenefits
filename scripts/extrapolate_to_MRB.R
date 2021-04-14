@@ -57,15 +57,19 @@ nhd <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                 ONOFFNET, PurpCode, PurpDesc,
                 MeanDepth, LakeVolume, MaxDepth, MeanDUsed, MeanDCode)
 
-mrb_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>% st_transform(crs=st_crs(nhd))
+mrb_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>% st_transform(crs=st_crs(nhd)) %>% mutate(aes = 'MRB Watershed')
 mrb_watershed %>%
   ggplot() +
   geom_sf() + theme_void()
 
-mrb_lakes <- st_intersection(nhd,mrb_watershed)
+mrb_lakes <- nhd[st_intersects(nhd,mrb_watershed)==TRUE,]
+# mrb_lakes <- st_intersection(nhd,mrb_watershed)
 mrb_lakes %>%
   ggplot() +
   geom_sf() + theme_void()
+
+mrb_lakes %<>% mutate(aes = 'MRB Waterbodies')
+st_write(mrb_lakes, 'store\\marb_waterbodies\\marb_waterbodies.shp')
 
 us_states <- subset(us_states(),
                    !name %in% c("United States Virgin Islands",
@@ -103,16 +107,16 @@ region <- ggplot() +
 ####################################################
 
 study_area <- ggplot() +
-  geom_sf(data=states,color='black',alpha=0.05) + 
-  geom_sf(data=watershed,aes(fill=aes),alpha=0.4) + 
-  geom_sf(data=shoreline,fill='white') + 
-  geom_sf(data=lakes,color='deepskyblue2',aes(fill=aes)) + 
-  geom_sf_text(data=states, aes(label=stusps)) +
+  geom_sf(data=mrb_states_sf,color='black',alpha=0.05) + 
+  geom_sf(data=mrb_watershed,aes(fill=aes),alpha=0.4) + 
+  # geom_sf(data=shoreline,fill='white') + 
+  # geom_sf(data=lakes,color='deepskyblue2',aes(fill=aes)) + 
+  geom_sf_text(data=mrb_states_sf, aes(label=stusps)) +
   scale_fill_manual(values=c("#9DBF9E",'deepskyblue2')) +
   # scale_color_carto_d(type ="diverging", palette="Earth") +
   theme_void() +
-  north(data=states,location="topright") + 
-  scalebar(data=states,location="bottomright",transform=T,dist=50,dist_unit="mi") +
+  north(data=mrb_states_sf,location="topright") + 
+  scalebar(data=mrb_states_sf,location="bottomright",transform=T,dist=50,dist_unit="mi") +
   labs(fill='') +
   theme(legend.position = c(0.89, 0.3),
         legend.key = element_rect(color=NA))
