@@ -47,29 +47,42 @@ setwd(here())
 # #   ggplot() +
 # #   geom_sf() + theme_void()
 
-ches_lakes <- st_read('store\\study_lakes\\study_lakes.shp')
+# ches_lakes <- st_read('store\\study_lakes\\study_lakes.shp')
 
 nhd <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                layer = "NHDWaterbody") %>%
-  dplyr::select(COMID, FDATE, RESOLUTION,
-                GNIS_ID, GNIS_NAME, AREASQKM, 
-                ELEVATION, REACHCODE, FTYPE, FCODE,
-                ONOFFNET, PurpCode, PurpDesc,
-                MeanDepth, LakeVolume, MaxDepth, MeanDUsed, MeanDCode)
-
-mrb_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>% st_transform(crs=st_crs(nhd)) %>% mutate(aes = 'MRB Watershed')
-mrb_watershed %>%
+               dplyr::select(COMID, AREASQKM, 
+                             ELEVATION, REACHCODE, FTYPE, FCODE,
+                             MeanDepth, LakeVolume, MaxDepth)
+nhd_pt <- st_centroid(nhd)
+nhd_pt %>%
   ggplot() +
   geom_sf() + theme_void()
 
-mrb_lakes <- nhd[st_intersects(nhd,mrb_watershed)==TRUE,]
+mrb_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>% st_transform(crs=st_crs(nhd)) %>% mutate(aes = 'MRB Watershed')
+mrb_watershed %>%
+ggplot() +
+geom_sf() + theme_void()
+
+int <- nhd_pt[which(unlist(st_intersects(nhd_pt,mrb_watershed))==1),]
+int %>%
+  ggplot() +
+  geom_sf() + theme_void()
+
+t <- st_intersection(nhd_pt,mrb_watershed)
+t %>%
+  ggplot() +
+  geom_sf() + theme_void()
+
+
+mrb_lakes <- nhd_pt[st_intersects(nhd,mrb_watershed)==TRUE,]
 # mrb_lakes <- st_intersection(nhd,mrb_watershed)
 mrb_lakes %>%
   ggplot() +
   geom_sf() + theme_void()
 
 mrb_lakes %<>% mutate(aes = 'MRB Waterbodies')
-st_write(mrb_lakes, 'store\\marb_waterbodies\\marb_waterbodies.shp')
+saveRDS(mrb_lakes, 'store\\marb_waterbodies.rds')
 
 us_states <- subset(us_states(),
                    !name %in% c("United States Virgin Islands",
