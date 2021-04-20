@@ -32,6 +32,7 @@ library(tigris) # county level data
 library(cowplot) # multiple plots per page
 library(ggiraph) # interactive county level plots
 library(ggallin) # psuedo log10 transformation
+library(rcartcolor) # color scales for maps
 
 # these libraries are needed when reading raw netCDF files,
 # but this work has been done and files are written to disk, then
@@ -852,15 +853,15 @@ An alternative approach to estimating uncertainty is to exploit the uncertainty 
 
 ```{r results='hide', message=FALSE, warning=FALSE}
 
-dat <- inner_join(as_tibble(dat.sf), as_tibble(iceCover))
-lakes <- dat %>% dplyr::select(WB_ID,AREASQKM,day_of_ice_filled)
+datKR <- inner_join(as_tibble(dat.sf), as_tibble(iceCover))
+lakes <- datKR %>% dplyr::select(WB_ID,AREASQKM,day_of_ice_filled)
 
 #####################################
 ################################  CH4
 #####################################
 
 ## 2010 Data
-dat_2010 <-  dat %>%
+dat_2010 <-  datKR %>%
   dplyr::select(Chla2010) %>%
   mutate('(Intercept)'=1, # match names in model
          Chla2010 = log10(Chla2010 * 1000)) %>% # mg/L chl to ug/L
@@ -869,7 +870,7 @@ dat_2010 <-  dat %>%
   as.matrix()
 
 ## TMDL Data
-dat_tmdl <-  dat %>%
+dat_tmdl <-  datKR %>%
   dplyr::select(ChlaTMDLnew) %>%
   mutate('(Intercept)'=1,
          ChlaTMDLnew = log10(ChlaTMDLnew * 1000)) %>% # mg/L chl to ug/L
@@ -933,7 +934,7 @@ summary(diff_ch4)
 #### PARTS 
 
 ## 2010 Data
-dat_2010 <-  dat %>%
+dat_2010 <-  datKR %>%
   dplyr::select(Pvv2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -945,7 +946,7 @@ dat_2010 <-  dat %>%
   as.matrix()
 
 ## TMDL Data
-dat_tmdl <-  dat %>%
+dat_tmdl <-  datKR %>%
   dplyr::select(PvvTMDLnew,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -1006,7 +1007,7 @@ summary(diff_co2)
 #### PARTS 
 
 ## 2010 Data
-dat_2010 <-  dat %>%
+dat_2010 <-  datKR %>%
   dplyr::select(Chla2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -1016,7 +1017,7 @@ dat_2010 <-  dat %>%
   as.matrix()
 
 ## TMDL Data
-dat_tmdl <-  dat %>%
+dat_tmdl <-  datKR %>%
   dplyr::select(ChlaTMDLnew,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -1185,7 +1186,7 @@ p6 <- ggplot() +
 
 cowplot::plot_grid(p1, p2, p3, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
 
-ggsave(file = "figures/poly.tiff", width = 15, height = 8, units = "in")
+ggsave(file = "output/figures/arealRatesNutrientsPoly.tiff", width = 15, height = 8, units = "in")
        
        
 ```
@@ -1276,18 +1277,18 @@ p6 <- ggplot() +
 
 cowplot::plot_grid(p1, p2, p3, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
 
-ggsave(file = "figures/point.tiff", width = 15, height = 8, units = "in")
+ggsave(file = "output/figures/arealRatesNutrientsPoint.tiff", width = 15, height = 8, units = "in")
 ```
 
 
-## Plots of difference in emission rates: 2010 - tmdl: point plots
+## Plots of difference in areal emission rates: 2010 - tmdl: point plots
 ```{r eval = FALSE}
 # first, lets add new fields to the data object
 dat.pt <- dat.pt %>% mutate(ch4diff = ch42010 - ch4TMDLnew,
                             co2diff = co22010 - co2TMDLnew,
                             n2odiff = n2o2010 - n2oTMDLnew)
 
-st_write(dat.pt, 'store\\results\\results.shp') ## export results
+# st_write(dat.pt, 'store\\results\\results.shp') ## export results
 
 # lets make sure the diff values make sense
 # there appear to be some extreme values that might obscure
@@ -1382,14 +1383,14 @@ p6 <- ggplot() +
 
 cowplot::plot_grid(p2, p3, NULL, p4, p5, p6, ncol = 3, nrow = 2, align = "hv")
 
-ggsave(file = "figures/pointDiff.tiff", width = 15, height = 8, units = "in")
+ggsave(file = "output/figures/pointDiff.tiff", width = 15, height = 8, units = "in")
 
 
 
 ```
 
 
-## Plots of difference in emission rates: 2010 - tmdl: point plots, green ramp
+## Plots of difference in areal emission rates: 2010 - tmdl: point plots with color ramps
 ```{r eval = FALSE}
 # Point plot-------------------
 # chl figure 
@@ -1397,13 +1398,13 @@ ggsave(file = "figures/pointDiff.tiff", width = 15, height = 8, units = "in")
 p2.col <- p2 + scale_color_gradientn(colors = rainbow(5))
 p3.col <- p3 + scale_color_gradientn(colors = rainbow(5))
 p4.col <- p4 + scale_color_gradientn(colors = rainbow(5))
-p5.col <- p5 + scale_color_gradientn(colors = rainbow(5))
-p6.col <- p6 + scale_color_gradientn(colors = rainbow(5))
+p5.col <- p5 + scale_color_carto_c(type ="diverging", palette="Earth") #rcartcolor library
+p6.col <- p6 + scale_color_carto_c(type ="diverging", palette="Earth")
 
 
 g <- gridExtra::grid.arrange(p2.col, p3.col, p4.col, p5.col, p6.col, ncol = 3, nrow = 2)
 
-ggsave(file = "figures/pointDiffRainbow.tiff", g, width = 15, height = 8, units = "in")
+ggsave(file = "output/figures/pointDiffRainbow.tiff", g, width = 15, height = 8, units = "in")
 
 ```
 
@@ -1429,7 +1430,8 @@ p1 <- ggplot() +
   labs(color = expression(atop(Avoided~CH[4], ~(MT~yr^{-1}))), size = expression(Lake~size~(km^{2}))) +
   theme(panel.background = element_blank(),
         panel.border = element_rect(color = "black", fill = NA),
-        legend.justification = c(0,1))
+        legend.justification = c(0,1)) +
+  scale_color_carto_c(type ="diverging", palette="Earth")
 
 
 # CO2
