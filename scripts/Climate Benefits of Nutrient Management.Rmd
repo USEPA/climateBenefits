@@ -33,6 +33,14 @@ library(cowplot) # multiple plots per page
 library(ggiraph) # interactive county level plots
 library(ggallin) # psuedo log10 transformation
 
+# these libraries are needed when reading raw netCDF files,
+# but this work has been done and files are written to disk, then
+# read in below.  The netCDF code has been commented out.  We technically
+# dont' need these libraries, but lets keep them for future reproducability.
+library(ncdf4) # reading in ice data
+library(ncdf4.helpers) # reading in ice data
+library(pbapply) # status updates for big ice data loop
+
 # Define local path for each user.  Will enable reading data from 
 # 'Climate benefits of nutrient management' OneDrive folder maintained by Chris Moore
 # 12/11/2020 moved all data into repo; no longer reading files out
@@ -166,9 +174,7 @@ lakeCtr <- st_centroid(dat.sf) # define centroid of lake polygon
 # # has no ice cover data for a handful of lakes.  That .shp is read into ArcGIS Pro and missing
 # # values are permuted using a nearest neighbor approach.  The final filled .shp is written out
 # # of ArcGIS Pro and read in below.  The code for the netCDF does not need to be rerun.
-# library(ncdf4)
-# library(ncdf4.helpers)
-# library(pbapply)
+
 # 
 # # awesome package vignette: 
 # # https://cran.r-project.org/web/packages/futureheatwaves/vignettes/starting_from_netcdf.html#:~:text=You%20can%20read%20netCDF%20data,connection%20to%20a%20netCDF%20file.

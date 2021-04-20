@@ -310,6 +310,13 @@
       "Repository": "CRAN",
       "Hash": "4d243a9c10b00589889fe32314ffd902"
     },
+    "ggallin": {
+      "Package": "ggallin",
+      "Version": "0.1.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "bc7ab704a1f8aac7606682a566dc76ed"
+    },
     "ggiraph": {
       "Package": "ggiraph",
       "Version": "0.7.8",
