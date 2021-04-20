@@ -807,7 +807,7 @@ ghg <- list() # empty list to hold results
 time.i <- print(Sys.time())
 for(i in 1:10000) { # 4 minutes
   #print(i) # print status update
-  tmpData <- dat[sample(1:nrow(dat), replace = TRUE), ] # bootstrap piece: sample with replacement
+  tmpData <- dat.yr[sample(1:nrow(dat.yr), replace = TRUE), ] # bootstrap piece: sample with replacement
   ghg[[i]] <- tmpData %>% # assign object to element i of list
     dplyr::select("WB_ID", !contains("yr.")) # exclude the upper and lower confidence estimates
 }
