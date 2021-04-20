@@ -898,7 +898,7 @@ preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes$`dat_2010 
 preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
 
 ##  Winter rate
-# Waldo et al In Review.  Mean rate from Nov.1 - April 1 = 14.4 +/-16.56
+# Waldo et al In Review.  Mean rate from Nov.1 - April 1 = 10.56 +/-11.52
 # this generates a winter emission rate for each lake based on the mean and sd
 # reported in Waldo et al.  Each lake will have a different winter rate, but 
 # the same rate will be used for 2010 and tmdl scenarios
@@ -1419,6 +1419,10 @@ dat.yr.sf <- merge(nhdSf, dat.yr, by.x = "COMID", by.y = "WB_ID", all.y = TRUE) 
 # convert to point for plotting
 dat.yr.sf <- st_centroid(dat.yr.sf)
 
+# Cut into quantiles to better visualize spatial patterning
+dat.yr.sf <- dat.yr.sf %>%
+  mutate()
+
 
 # CH4
 p1 <- ggplot() +
@@ -1649,7 +1653,7 @@ ggsave(file = "figures/cdf.tiff", g, width = 12, height = 8, units = "in")
 ## Histogram of reductions
 
 
-```{r}
+```{r eval = FALSE}
 # prepare data
 dat.yr.sf.all <- merge(dat.yr.sf, dat) # bring Chl, PVV, etc back into annual emission estimates
 dim(dat.yr.sf.all)
@@ -1821,7 +1825,7 @@ ggplot(dat.yr.sf.all, aes(x=AREASQKM)) + geom_histogram(bins = 75) + scale_x_log
 ```
 
 ## Avoided emissions expressed in GWP
-```{r, eval = FALSE}
+```{r eval = FALSE}
 # CH4 and N2O are more potent GHGs than CO2.  To enable comparison, the global warming potential (GWP)
 # of CH4 and N2O emissions can be expressed relative to that of CO2.  On 100-year horizon, CH4 = 28, N2O = 265
 
@@ -1853,7 +1857,7 @@ ggsave(file = "output/figures/mass.gwp.tiff", width = 9, height = 4, units = "in
 ```
 
 ## NE lakes model output
-```{r, eval=FALSE}
+```{r eval=FALSE}
 # Map of 2010 chla and TP-----------------
 # chl figure 
 # better without extreme values
@@ -1954,7 +1958,7 @@ ggsave(file = "output/figures/NElakesOutputCDF.tiff", width = 4, height = 5.5, u
 
 
 # Write data for collaborators
-```{r, eval=FALSE}
+```{r eval=FALSE}
 # select columns of interest, convert units
 
 dat.yr.sf.all %>% 
