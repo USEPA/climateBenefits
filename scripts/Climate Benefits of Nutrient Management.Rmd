@@ -32,7 +32,7 @@ library(tigris) # county level data
 library(cowplot) # multiple plots per page
 library(ggiraph) # interactive county level plots
 library(ggallin) # psuedo log10 transformation
-library(rcartcolor) # color scales for maps
+library(rcartocolor) # color scales for maps
 
 # these libraries are needed when reading raw netCDF files,
 # but this work has been done and files are written to disk, then

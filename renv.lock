@@ -625,6 +625,13 @@
       "Repository": "CRAN",
       "Hash": "5e3c5dc0b071b21fa128676560dbe94d"
     },
+    "rcartocolor": {
+      "Package": "rcartocolor",
+      "Version": "2.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "42b5652d8d7b5583710edca989450c2f"
+    },
     "readr": {
       "Package": "readr",
       "Version": "1.3.1",
