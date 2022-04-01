@@ -206,6 +206,8 @@ ggsave(filename = "output\\figures\\scn2o.png",
 ####################################################
 #############################################  CLEAN
 ####################################################
+
+## SHOOT, SORRY BRIAN, THESE ARE THE DIFFERENCES IN AREAL EMISSION RATES IN MG GHG M-2 D-1
 sizes <- c("Small","Medium","Large")
 summary(results$co2diff)
 qco2 <- c("Lower 25%: < 51 MT/yr","25% to 50%: 51-92 MT/yr","50% to 75%: 92-151 MT/yr","75% to 100%: > 151 MT/yr")
