@@ -55,31 +55,24 @@ nhd <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                              ELEVATION, REACHCODE, FTYPE, FCODE,
                              MeanDepth, LakeVolume, MaxDepth)
 nhd_pt <- st_centroid(nhd)
-nhd_pt %>%
-  ggplot() +
-  geom_sf() + theme_void()
+# nhd_pt %>%
+#   ggplot() +
+#   geom_sf() #+ theme_void()
 
 mrb_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>% st_transform(crs=st_crs(nhd)) %>% mutate(aes = 'MRB Watershed')
 mrb_watershed %>%
 ggplot() +
-geom_sf() + theme_void()
+geom_sf() #+ theme_void()
 
-int <- nhd_pt[which(unlist(st_intersects(nhd_pt,mrb_watershed))==1),]
-int %>%
-  ggplot() +
-  geom_sf() + theme_void()
+mrb_lakes <- st_intersection(nhd_pt,mrb_watershed)
+ggplot(mrb_lakes) +
+  geom_sf() 
 
-t <- st_intersection(nhd_pt,mrb_watershed)
-t %>%
-  ggplot() +
-  geom_sf() + theme_void()
-
-
-mrb_lakes <- nhd_pt[st_intersects(nhd,mrb_watershed)==TRUE,]
-# mrb_lakes <- st_intersection(nhd,mrb_watershed)
-mrb_lakes %>%
-  ggplot() +
-  geom_sf() + theme_void()
+# mrb_lakes <- nhd_pt[st_intersects(nhd,mrb_watershed)==TRUE,]
+# # mrb_lakes <- st_intersection(nhd,mrb_watershed)
+# mrb_lakes %>%
+#   ggplot() +
+#   geom_sf() + theme_void()
 
 mrb_lakes %<>% mutate(aes = 'MRB Waterbodies')
 saveRDS(mrb_lakes, 'store\\marb_waterbodies.rds')
@@ -93,9 +86,13 @@ us_states <- subset(us_states(),
                                 "Alaska",
                                 "Hawaii")) %>%
               st_transform(crs = st_crs(nhd))
+ggplot(us_states) +
+  geom_sf()
 
 mrb_states <- st_intersection(us_states,mrb_watershed)
 mrb_state_abbr <- mrb_states$state_abbr
+ggplot(mrb_states) +
+  geom_sf()
 
 mrb_states_sf <- subset(us_states(),
                    state_abbr  %in% mrb_state_abbr) %>%
