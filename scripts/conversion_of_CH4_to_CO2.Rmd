@@ -30,7 +30,7 @@ Our simulation of winter CH~4~ and CO~2~ emissions from lakes can therefore acco
 
 ##### step 1: discount winter CH~4~ emissions for the mass of CH~4~ subject to methanotrophy during ice out:
   
-mass of CH~4~ subject to methanotrophy during ice out = [winter CH~4~ emission rates * days of ice cover * surface area] * runif(n=1, min = 0.01, max = 0.06)
+mass of CH~4~ subject to methanotrophy during ice out = [winter CH~4~ emission rates * days of ice cover * surface area] * runif(n=1, min = 0.01, max = 0.6)
 \  
 \   
 \   
