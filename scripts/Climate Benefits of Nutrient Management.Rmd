@@ -847,7 +847,7 @@ dat_tmdl <-  datKR %>%
 
 ####  PREDICTIONS
 set.seed(42)
-ch4 <- replicate(10, { #1e4
+ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
@@ -888,7 +888,7 @@ ch4 <- replicate(10, { #1e4
   ## discount winter ch4 emissions for the mass subject to methanotrophy
   ch4.prop.methantrophy <- runif(n = nrow(lakes), min = 0.01, max = 0.6) # proportion of ch4 that is subject to oxidization
   
-  ## methanotrophy
+  ## methanotrophy: ch4 oxidized to co2, as opposed to being incorporated into microbial biomass
   ch4.to.co2 <- runif(n = nrow(lakes), min = 0.05, max = 0.8) # proportion of ch4 that oxidizes to co2 
   
   #################################
@@ -986,9 +986,10 @@ dat_tmdl <-  datKR %>%
 
 ####  PREDICTIONS
 set.seed(42)
-diff_co2 <- NULL # epmty object to collect results
-  for (i in 1:10) { #10000
-  
+diff_co2 <- NULL # empty object to collect results
+# using for loop because i need to reference index i.
+  for (i in 1:10000) { #10000
+  print(i)
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
   
@@ -1031,9 +1032,7 @@ diff_co2 <- NULL # epmty object to collect results
   ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
 }
 
-
-# ## co2 from methanotrophy
-# diff_co2 = diff_co2 + co2.from.ch4
+# inspect results
 summary(diff_co2)
 
 
@@ -1067,7 +1066,7 @@ dat_tmdl <-  datKR %>%
 ####  PREDICTIONS
 
 set.seed(42)
-diff_n2o <- replicate(10, { # 1e4
+diff_n2o <- pbreplicate(1e4, { # 1e4
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.n2o), Sigma = vcov(mod.n2o))
