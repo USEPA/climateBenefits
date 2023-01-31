@@ -1,0 +1,13 @@
+GRIDCODE	climate zone
+1	tropical montane
+2	tropical wet
+3	tropical moist
+4	tropical dry
+5	warm temperate moist
+6	warm temperate dry
+7	cool temperate moist
+8	cool temperate dry
+9	boreal moist
+10	boreal dry
+11	polar moist
+12	polar dry
