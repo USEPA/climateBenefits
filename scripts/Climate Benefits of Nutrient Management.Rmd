@@ -847,7 +847,7 @@ dat_tmdl <-  datKR %>%
 
 ####  PREDICTIONS
 set.seed(42)
-ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
+ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate gives a progress bar
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
@@ -872,7 +872,7 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
   # ch4.winter <- rnorm(n = nrow(lakes), mean = 10.56, sd = 11.52) # mg CH4 m-2 d-1
   ## we want a truncated normal such that winter rates don't extend beyond the tails of the summer emission rates
   # set.seed(42)
-  ch4.winter.truncated <- rtruncnorm(n=nrow(lakes), a=-1, b=4e3, mean=10.56, sd=11.52)
+  ch4.winter.truncated <- rtruncnorm(n=nrow(lakes), a = -1, b = 4e3, mean = 10.56, sd = 11.52)
   
   ## plot histogram comparing normal to truncated normal
   # b <- min(c(ch4.winter,ch4.winter.t)) - 0.001 # Set the minimum for the breakpoints
@@ -933,7 +933,10 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
   
   # ## Convert and take difference in predictions and sum across all lakes
   # sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
-  # 
+
+  ## THIS IS WHERE WE NEED TO EXPORT LAKE SPECIFIC EMISSIONS REDUCTIONS FROM EACH SIMULATION TO EXTRAPOLATE TO THE MISSISSIPPI RIVER, REPEAT WITH CO2 AND N2O
+  
+  
   ## Convert and take difference in predictions and sum across all lakes and store CO2 from methanotrophy
   list(
     # CH4 incremental change, summed across all lakes
