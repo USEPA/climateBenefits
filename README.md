@@ -2,7 +2,7 @@
 
 ## Jake Beaulieu (US EPA ORD), Elizabeth Kopits (US EPA NCEE), Chris Moore (US EPA NCEE), Bryan Parthum (US EPA NCEE)
 
-This repo contains data and code for estimating climate benefits of nutrient management. A summary of the results and methods can be found in the summary document `store/Climate-Benefits-of-Nutrient-Management.html`. 
+This repo contains data and code for estimating climate benefits of nutrient management. A summary of the results and methods can be found in the summary document `scripts/Climate-Benefits-of-Nutrient-Management.html`. 
 
 > **Abstract:** 
 > Eutrophication in lakes and reservoirs contributes to emissions of carbon dioxide, methane, and nitrous oxide. Water management policies that reduce nutrient loadings also reduce eutrophication and associated greenhouse gas (GHG) emissions. These reductions in GHG emissions have not, to date, been considered when evaluating the costs and benefits of a proposed policy. We integrate biophysical and economic models to estimate the previously unquantified climate benefits of a large nutrient management program in the northeastern United States. The climate benefits of the policy are estimated to be between $207 million to 484 million (2020USD, 2% discount rate) over the first 50 years of the management program. Our estimates suggest that reductions in GHG emissions from nutrient management programs should be taken into account in helping to meet regional, national, and global GHG mitigation goals.  
