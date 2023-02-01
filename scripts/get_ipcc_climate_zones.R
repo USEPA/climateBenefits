@@ -17,13 +17,20 @@ if(length(new.packages)) install.packages(new.packages, repos = "http://cran.rst
 lapply(list.of.packages, library, character.only = TRUE)
 
 ##########################
+#################### parts
+##########################
+
+## colorblind friendly palette from http://www.cookbook-r.com/Graphs/Colors_(ggplot2)/
+colors = c("#56B4E9", "#F0E442", "#000000", "#E69F00", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
+##########################
 ##################### data
 ##########################
 
 ## watershed boundary
 watershed =
   st_read('maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp') %>%
-  mutate(aes = 'Chesapeake Bay\nWatershed')
+  mutate(aes = 'Chesapeake Bay \nWatershed')
 
 # ## test plot
 # watershed %>%
@@ -44,7 +51,7 @@ zones =
 ## get lakes from study area
 lakes = 
   st_read('store/study_lakes/study_lakes.shp') %>% 
-  select(WB_ID, AREASQK) %>% 
+  dplyr::select(WB_ID, AREASQK) %>% 
   st_transform(st_crs(zones))
 
 # ## test plot
@@ -68,7 +75,7 @@ data =
             join = st_within) %>% 
       st_drop_geometry %>% 
       as_tibble %>% 
-      select(WB_ID, clmt_zn) %>% 
+      dplyr::select(WB_ID, clmt_zn) %>% 
       rename(climate.zone = clmt_zn),
     by = 'WB_ID'
   )
@@ -82,7 +89,7 @@ data %<>%
   mutate(type = case_when(AREASQK <  0.08 ~ 'pond',
                           AREASQK >= 0.08 ~ 'reservoir'))
 ## check
-data %>% st_drop_geometry %>% select(type) %>% table
+data %>% st_drop_geometry %>% dplyr::select(type) %>% table
 
 ## rename to title case
 data %<>% 
@@ -91,7 +98,7 @@ data %<>%
 ## export waterbody type
 data %>% 
   st_drop_geometry %>% 
-  select(WB_ID, climate.zone, type) %>% 
+  dplyr::select(WB_ID, climate.zone, type) %>% 
   write_csv('store/climate_zones_for_ches_waterbodies.csv')
 
 ## get shoreline
@@ -166,8 +173,8 @@ study_area =
        fill  = '',
        label = '') +
   theme_void() +
-  theme(legend.position = c(0.89, 0.3),
-        legend.key = element_rect(color=NA))
+  theme(legend.position = 'bottom',
+        legend.key = element_rect(color = NA))
 
 ## draw study area inset 
 ggdraw() +
@@ -175,6 +182,6 @@ ggdraw() +
   draw_plot(region, x = 0.05, y = 0.55, width = 0.35, height = 0.35)
 
 ## export
-ggsave("output/figures/climate_zones.png", width  = 6, height = 8)
+ggsave("output/figures/climate_zones.svg", width  = 6, height = 8)
 
 ## end of script. have a great day! 

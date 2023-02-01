@@ -37,34 +37,42 @@ watershed =
 #   geom_sf() +
 #   theme_void()
 
-## get lakes from nhd
-lakes = 
-  st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
-          layer = "NHDWaterbody") %>%
-  dplyr::select(COMID, AREASQKM) %>% 
-  st_transform(st_crs(watershed))
+# ## get lakes from nhd
+# lakes = 
+#   st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
+#           layer = "NHDWaterbody") %>%
+#   dplyr::select(COMID, AREASQKM) %>% 
+#   st_transform(st_crs(watershed))
+# 
+# ## trim lakes to watershed
+# ## start clock
+# start.filter.time <- proc.time()
+# lakes.mrb = 
+#   lakes %>% 
+#   st_filter(watershed, .pred = st_intersect)
+# ## stop clock
+# filter.time = proc.time() - start.filter.time
+# 
+# ## check computation time, took about 1.5 hours to filter lakes only in the mrb
+# print('time it took to filter to watershed: ')
+# filter.time
+# 
+# ## clean house
+# rm(lakes)
+# gc()
+# 
+# ## get centroids for climate zone intersection
+# lake.points = 
+#   lakes.mrb %>% 
+#   st_centroid
+# 
+# ## export
+# lakes.mrb %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb.shp')
+# lake.points %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb_as_points.shp')
 
-## trim lakes to watershed
-## start clock
-start.filter.time <- proc.time()
-lakes.mrb = 
-  lakes %>% 
-  st_filter(watershed, .pred = st_intersect)
-## stop clock
-filter.time = proc.time() - start.filter.time
-
-## clean house
-rm(lakes)
-gc()
-
-## get centroids for climate zone intersection
-lake.points = 
-  lakes.mrb %>% 
-  st_centroid
-
-## export
-lakes.mrb %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb.shp')
-lake.points %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb_as_points.shp')
+## read from above
+lakes.mrb = st_read('store/ndh_in_mrb/nhd_lakes_in_mrb.shp')
+lake.points = st_read('store/ndh_in_mrb/nhd_lakes_in_mrb_as_points.shp')
 
 ## get climate zones from ipcc
 zones = 
@@ -96,16 +104,25 @@ data =
 ## stop clock
 zone.time = proc.time() - start.zone.time
 
+## check computation times, took about 3 minutes to extract climate zones
+print('time it took to extract climate zones: ')
+zone.time
+
 ## clean house
-rm(lake.points)
+rm(lake.points, lakes.mrb)
 gc()
 
 ## classify as pond or reservoir
 data %<>% 
-  mutate(type = case_when(AREASQK <  0.08 ~ 'pond',
-                          AREASQK >= 0.08 ~ 'reservoir'))
+  mutate(type = case_when(AREASQKM <  0.08 ~ 'pond',
+                          AREASQKM >= 0.08 ~ 'reservoir'))
+
 ## check
-data %>% st_drop_geometry %>% select(type) %>% table
+data %>% st_drop_geometry %>% dplyr::select(type, climate.zone) %>% table
+
+# type        boreal dry boreal moist cool temperate dry cool temperate moist tropical dry tropical moist warm temperate dry warm temperate moist
+# pond             128            1              28411                43882          170          16452              11972                47209
+# reservoir         23            0               6182                23118           22           7540               2773                10553
 
 ## rename to title case
 data %<>% 
@@ -114,7 +131,7 @@ data %<>%
 ## export waterbody type
 data %>% 
   st_drop_geometry %>% 
-  select(COMID, climate.zone, type) %>% 
+  dplyr::select(COMID, climate.zone, type) %>% 
   write_csv('store/climate_zones_for_mrb_waterbodies.csv')
 
 ## get state polygons
@@ -132,7 +149,7 @@ us_states = subset(USAboundaries::us_states(),
 ##################### plot
 ##########################
 
-study_area = 
+plot = 
   ggplot() +
   geom_sf(data  = us_states,
           color = 'black',
@@ -144,37 +161,27 @@ study_area =
   geom_sf(data  = data,
           aes(color = climate.zone,
               fill  = climate.zone)) + 
-  geom_sf_text(data = states, 
-               aes(label = stusps)) +
   scale_color_manual(values = colors) +
   scale_fill_manual(values = colors) +
-  north(data     = states,
-        location = "topright") + 
-  scalebar(data      = states,
-           location  = "bottomright",
-           transform = T,
-           dist      = 50,
-           dist_unit = "mi") +
+  # north(data     = us_states,
+  #       location = "topright") +
+  # scalebar(data      = us_states,
+  #          location  = "bottomright",
+  #          transform = T,
+  #          dist      = 1000,
+  #          dist_unit = "mi") +
   labs(color = '',
        fill  = '',
        label = '') +
   theme_void() +
-  theme(legend.position = c(0.89, 0.3),
-        legend.key = element_rect(color=NA))
-
-## draw study area inset 
-ggdraw() +
-  draw_plot(study_area) +
-  draw_plot(region, x = 0.05, y = 0.55, width = 0.35, height = 0.35)
+  theme(legend.position = 'bottom',
+        legend.key      = element_rect(color = NA),
+        legend.key.size = unit(0.5, 'cm')) + 
+  guides(color = guide_legend(nrow = 3),
+         fill  = guide_legend(nrow = 3))
 
 ## export
-ggsave("output/figures/climate_zones_mrb.png", width  = 6, height = 8)
-
-## check times
-print('time it took to filter to watershed: ')
-filter.time
-
-print('time it took to extract climate zones: ')
-zone.time
+ggsave("output/figures/climate_zones_mrb.svg", plot, width  = 9, height = 6)
+ggsave("output/figures/climate_zones_mrb.png", plot, width  = 9, height = 6)
 
 ## end of script. have a great day! 

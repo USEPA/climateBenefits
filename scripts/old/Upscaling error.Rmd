@@ -1,0 +1,113 @@
+---
+title: "Estimating error with linear regression"
+author: "J. Beaulieu"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    fig_caption: yes
+    depth: 2
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r results='hide', message=FALSE, warning=FALSE}
+# load libraries
+library(tidyverse) # dplyr, ggplot
+
+# Identify local path for each user
+localPath <- Sys.getenv("USERPROFILE")
+```
+
+# Background
+
+Lakes and reservoirs emit methane (CH~4~), a potent greenhouse gas (GHG), to the atmosphere.  CH~4~ emission rates (mass of CH~4~/unit time/unit area) tend to increase with lake chlorophyll (chl) content, an integrative measure of water quality.  Water quality regulations that limit nutrient loading to surface waters could lead to reduced chl content, thereby indirectly reducing CH~4~ emission rates.  
+
+In this project we modeled chl concentrations in ~4000 lakes in the Chesepeake watershed under two scenarios.  Scenario 1, entitled '2010', reflects current conditions.  Scenario 2, entitled 'TMDL', reflects future conditions where management actions have reduced nutrient loading to surface waters.  The objective of the project is to quantify the aggregate reduction in CH~4~ emissions from the ~4000 lakes under the TMDL scenario.  This quantity is called the 'incremental' change.  The incremental change must be presented with an error estimate.
+
+# Methods
+
+DelSontro et al. (2018) present a linear regression model for predicting CH~4~ emission rates (mg CH~4~-C m^-2^ day^-1^) from lake chl concentrations (ug/L).  The model was created on the log-log scale with a small positive offset to accommodate negative CH~4~ emission rates reported in the literature:
+
+log10(CH~4~ + 1) = 0.778 * log10(chl) + 0.940
+
+
+
+```{r}
+# Total CH4 model.  mg CH4-C m-2 d-1
+# read from disk
+mod <- readRDS(paste0(Sys.getenv("USERPROFILE"), 
+                       "/Environmental Protection Agency (EPA)/",
+                       "Moore, Chris - Climate benefits of nutrient management/",
+                       "analysis/climateBenefits_jb/models/pCh4.rds"))
+
+summary(mod) # review model
+```
+
+The model predicts log10(CH~4~ + 1) with CH~4~ in units of mg CH~4~-C m^-2^ day^-1^.  Predictions are back transformed to linear space and converted from mg CH~4~**-C** to mg CH~4~ via a helper function.
+
+```{r}
+# little function to get CH4 in desired units
+pCh4 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg C m-2 d-1)
+  mgCh4c <- 10^(x) - 1 # unlog, then subtract 1
+  mgCh4 <- mgCh4c * (16/12) # mg CH4-C -> mg CH4
+  return(mgCh4)
+}
+
+```
+
+To illustrate the workflow, we simulate a data set of lake chl concentrations for 25 hypothetical lakes under the 2010 and TMDL scenarios.
+```{r}
+# dataset reflecting lake chlorophyll concentrations in the Chesepeake Bay watershed.
+# the "2010" scenario reflects current conditions, the "TMDL" scenario reflects future
+# conditions where management actions have reduced chlorophyll conditions
+
+chesChl <- tibble(WB_ID = runif(25, min = 2597743, max = 22746227), # unique identifier for each water body
+                  areaKm2 = runif(25, min = 0.2, max = 10), # surface area of each waterbody (km2)
+                  chl2010 = rnorm(25, 30, 1), # mean of 30 ug/Lin 2010
+                  chlTMDL = rnorm(25, 10, 1)) # mean of 10 ug/L under TMDL scenario
+
+```
+
+We use the DelSontro et al. (2018) model to predict CH~4~ emission rates (mg CH~4~ m^-2^ day^-1^) for each lake under both conditions:
+
+```{r}
+# use 'mod' to predict ch4 emission rate for each lake under both scenarios                  
+chesChl <- chesChl %>%
+  mutate(ch42010 = predict(mod, newdata = list(Chlorophyll.a..ug.L. = chl2010)) %>% # predicted log10(CH4-C + 1)
+           pCh4(.), # convert to mg CH4 m-2 d-1
+         ch4TMDL = predict(mod, newdata = list(Chlorophyll.a..ug.L. = chlTMDL)) %>% # predicted log10(CH4-C + 1)
+           pCh4(.)) # convert to mg CH4 m-2 d-1
+
+```
+
+Total CH~4~ emitted from each waterbody is the product of the areal emission rate and waterbody size.  Here we calculate total CH~4~ emissions (mg CH~4~ day^-1^) from each waterbody.
+
+
+```{r}
+chesChl <- chesChl %>%
+  mutate(ch4.lk.d.2010 = ch42010 * 1000000 * areaKm2, # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+         ch4.lk.d.TMDL = ch4TMDL * 1000000 * areaKm2) # 1000000m2 = 1km2.  new variable in mg CH4 d-1
+```
+
+Finally, we can calculate the difference in CH~4~ emissions for each lake under the two scenarios, then sum the difference as the 'incremental change' reported in metric tons of CH~4~.
+
+```{r}
+chesChl %>%
+  mutate(ch4Diff.lk.d = ch4.lk.d.2010 - ch4.lk.d.TMDL) %>% # new variable in mg CH4 d-1. Difference in per lake emissions
+  summarize(incrementalCh4 = sum(ch4Diff.lk.d) / (1000*1000*1000)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+```
+
+# Discussion and statement of need
+The workflow outlined above allows for calculation of incremental change, but does not provide an error estimate.  We seek contractor support implementing a method for estimating error.
+
+We have tried two approaches.  The first approach utilized the 'interval' argument of the predict function to calculate the 95% confidence interval.
+```{r}
+
+predict(mod, newdata = list(Chlorophyll.a..ug.L. = chesChl$chl2010), interval = "confidence")
+
+```
+This allows for the calculation of minimum and maximum incremental change, but we aren't entirely sure if this is the best approach.  The second approach bootstraps a new sample (with replacement) from the ~4000 lakes.  We then 1) execute the workflow above for 1000 bootstrapped samples, and 2) calculate mean and variance of the 1000 increment values.  This procedure simulates sampling error, but assumes the model predictions are perfect, which they are not.  I would prefer an approach that accounts for error in the model estimates.
