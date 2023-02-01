@@ -1,0 +1,5 @@
+type,climate.zone,co2_2010_lakes.mean,co2_tmdl_lakes.mean
+pond,Cool Temperate Moist,17.64947914483253,16.87436634490099
+pond,Warm Temperate Moist,22.628411571108234,21.517380633580277
+reservoir,Cool Temperate Moist,112.80860092981526,110.4847489068521
+reservoir,Warm Temperate Moist,180.00446980600023,176.39106927464337
