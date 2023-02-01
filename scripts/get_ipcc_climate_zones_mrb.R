@@ -20,7 +20,7 @@ lapply(list.of.packages, library, character.only = TRUE)
 ##########################
 
 ## colorblind friendly palette from http://www.cookbook-r.com/Graphs/Colors_(ggplot2)/
-colors = c("#56B4E9", "#E69F00", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#000000")
+colors = c("#E69F00", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999", "#000000", "#56B4E9")
 
 ##########################
 ##################### data
@@ -97,8 +97,8 @@ data =
             join = st_within) %>% 
       st_drop_geometry %>% 
       as_tibble %>% 
-      dplyr::select(COMID, clmt_zn) %>% 
-      rename(climate.zone = clmt_zn),
+      dplyr::select(COMID, fldd_zn) %>% 
+      rename(climate.zone = fldd_zn),
     by = 'COMID'
   )
 ## stop clock
@@ -120,13 +120,20 @@ data %<>%
 ## check
 data %>% st_drop_geometry %>% dplyr::select(type, climate.zone) %>% table
 
-# type        boreal dry boreal moist cool temperate dry cool temperate moist tropical dry tropical moist warm temperate dry warm temperate moist
-# pond             128            1              28411                43882          170          16452              11972                47209
-# reservoir         23            0               6182                23118           22           7540               2773                10553
+# climate.zone
+# type        boreal cool temperate tropical dry/montane tropical moist/wet warm temperate dry warm temperate moist
+# pond         129          72293                  170              16452              11972                47209
+# reservoir     23          29300                   22               7540               2773                10553
 
 ## rename to title case
 data %<>% 
   mutate(climate.zone = str_to_title(climate.zone))
+
+## drop lake superior
+data %<>% filter(AREASQKM<50000)
+
+## there are 145 NA for climate zones, they are all off the coast of Louisiana
+data %<>% filter(!is.na(climate.zone))
 
 ## export waterbody type
 data %>% 
@@ -155,12 +162,12 @@ plot =
           color = 'black',
           alpha = 0.05) + 
   geom_sf(data  = watershed,
-          aes(color = aes,
-              fill  = aes),
-          alpha = 0.1) + 
+          color = "#56B4E9",
+          fill  = "#56B4E9",
+          alpha = 0.1) +
   geom_sf(data  = data,
           aes(color = climate.zone,
-              fill  = climate.zone)) + 
+              fill  = climate.zone)) +
   scale_color_manual(values = colors) +
   scale_fill_manual(values = colors) +
   # north(data     = us_states,
@@ -174,9 +181,7 @@ plot =
        fill  = '',
        label = '') +
   theme_void() +
-  theme(legend.position = 'bottom',
-        legend.key      = element_rect(color = NA),
-        legend.key.size = unit(0.5, 'cm')) + 
+  theme(legend.position = 'bottom') + 
   guides(color = guide_legend(nrow = 3),
          fill  = guide_legend(nrow = 3))
 

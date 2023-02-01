@@ -75,8 +75,8 @@ data =
             join = st_within) %>% 
       st_drop_geometry %>% 
       as_tibble %>% 
-      dplyr::select(WB_ID, clmt_zn) %>% 
-      rename(climate.zone = clmt_zn),
+      dplyr::select(WB_ID, fldd_zn) %>% 
+      rename(climate.zone = fldd_zn),
     by = 'WB_ID'
   )
 
@@ -89,7 +89,11 @@ data %<>%
   mutate(type = case_when(AREASQK <  0.08 ~ 'pond',
                           AREASQK >= 0.08 ~ 'reservoir'))
 ## check
-data %>% st_drop_geometry %>% dplyr::select(type) %>% table
+data %>% st_drop_geometry %>% dplyr::select(climate.zone, type) %>% table
+# type
+# climate.zone           pond reservoir
+# Cool Temperate        844       352
+# Warm Temperate Moist 2440       586
 
 ## rename to title case
 data %<>% 
@@ -150,9 +154,9 @@ study_area =
           color = 'black',
           alpha = 0.05) + 
   geom_sf(data  = watershed,
-          aes(color = aes,
-              fill  = aes),
-          alpha = 0.2) + 
+          color = "#56B4E9",
+          fill  = "#56B4E9",
+          alpha = 0.1) +
   geom_sf(data  = shoreline,
           fill  = 'white') + 
   geom_sf(data  = data,
@@ -160,8 +164,8 @@ study_area =
               fill  = climate.zone)) + 
   geom_sf_text(data = states, 
                aes(label = stusps)) +
-  scale_color_manual(values = c("#9DBF9E", "#56B4E9", "#E69F00")) +
-  scale_fill_manual(values = c("#9DBF9E","#56B4E9", "#E69F00")) +
+  scale_color_manual(values = c("#009E73", "#CC79A7")) +
+  scale_fill_manual(values = c("#009E73","#CC79A7")) +
   north(data     = states,
         location = "topright") + 
   scalebar(data      = states,
@@ -173,8 +177,7 @@ study_area =
        fill  = '',
        label = '') +
   theme_void() +
-  theme(legend.position = 'bottom',
-        legend.key = element_rect(color = NA))
+  theme(legend.position = 'bottom')
 
 ## draw study area inset 
 ggdraw() +
