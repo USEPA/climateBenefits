@@ -1,5 +1,5 @@
-type,climate.zone,incr.co2.mean
-pond,Cool Temperate Moist,0.7601606221675575
-pond,Warm Temperate Moist,1.0905244612728522
-reservoir,Cool Temperate Moist,2.6611887232362763
-reservoir,Warm Temperate Moist,4.1262318451795075
+type,climate.zone,incr.co2.mean.pct
+pond,Cool Temperate Moist,0.04192370379234839
+pond,Warm Temperate Moist,0.04684052176389801
+reservoir,Cool Temperate Moist,0.022347821517106285
+reservoir,Warm Temperate Moist,0.02127186863654314

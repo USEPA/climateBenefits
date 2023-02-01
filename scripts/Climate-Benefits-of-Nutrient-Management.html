@@ -11,7 +11,7 @@
 
 <meta name="author" content="J. Beaulieu, E. Kopits, C. Moore, B. Parthum" />
 
-<meta name="date" content="2023-01-31" />
+<meta name="date" content="2023-02-01" />
 
 <title>Climate Benefits of Nutrient Management</title>
 
@@ -3071,7 +3071,7 @@ border-radius: 0px;
 <h1 class="title toc-ignore">Climate Benefits of Nutrient
 Management</h1>
 <h4 class="author">J. Beaulieu, E. Kopits, C. Moore, B. Parthum</h4>
-<h4 class="date">2023-01-31</h4>
+<h4 class="date">2023-02-01</h4>
 
 </div>
 
@@ -4448,7 +4448,7 @@ day<sup>-1</sup></h3>
 <p>The next step is to convert the areal emission rates (mg GHG
 m<sup>-2</sup> day<sup>-1</sup>) to a daily emission (mg GHG
 day<sup>-1</sup>) for each waterbody.</p>
-<pre class="r"><code>dat &lt;- dat %&gt;% mutate(
+<pre class="r"><code>dat %&lt;&gt;% mutate(
   # CH4
   # 2010: upscale to per lake per day emissions
   ch42010.lk.d = ch42010 * 1e6 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
@@ -5160,7 +5160,7 @@ be calculated as the difference between the 2010 97.5 percentile and the
 TMDLnew 97.5 percentile. The lower 2.5 percentile can be calculated as
 the difference between the 2010 and TMDLnew lower 2.5 percentile.
 <!-- This calculation leads to very wide confidence intervals, including negative values for N~2~O and CO~2~.  This is probably not the best way to estimate uncertainty; however, the 'mean' estimates should be pretty good. --></p>
-<pre class="r"><code>dat.sum &lt;- dat.sum %&gt;%
+<pre class="r"><code>dat.sum %&lt;&gt;%
   # incremental change (metric tons yr-1)
   mutate(ch4incr.yr = ch42010.yr.sum - ch4TMDLnew.yr.sum, 
          ch4incr.yr.upr = ch42010.yr.upr.sum - ch4TMDLnew.yr.upr.sum, 
@@ -5377,28 +5377,28 @@ lower 2.5
 <tbody>
 <tr>
 <td style="text-align:right;">
-1824
+1821
 </td>
 <td style="text-align:right;">
-2118
+2107
 </td>
 <td style="text-align:right;">
-1572
+1565
 </td>
 <td style="text-align:right;">
-7001
+7000
 </td>
 <td style="text-align:right;">
-7306
+7308
 </td>
 <td style="text-align:right;">
-6702
+6704
 </td>
 <td style="text-align:right;">
 4.6
 </td>
 <td style="text-align:right;">
-5.4
+5.3
 </td>
 <td style="text-align:right;">
 3.9
@@ -5463,6 +5463,7 @@ emissions.by.type.ch4 = tibble()
 set.seed(42)
 
 ## number of simulations
+# N = 10
 N = 1e4
 
 ch4 &lt;- pbreplicate(N, { ## pbreplicate gives a progress bar
@@ -5560,13 +5561,13 @@ ch4 &lt;- pbreplicate(N, { ## pbreplicate gives a progress bar
       emissions.by.type.ch4,
       left_join(
         left_join(
-          aggregate(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, 
+          aggregate((preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes)/preds_2010_lakes$preds_2010_lakes, 
                     list(preds_2010_lakes$type, 
                          preds_2010_lakes$climate.zone), 
                     FUN = mean) %&gt;% 
             rename(type         = Group.1,
                    climate.zone = Group.2, 
-                   incr.ch4.mean = x),
+                   incr.ch4.mean.pct = x),
           aggregate((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
                     list(preds_2010_lakes$type,
                          preds_2010_lakes$climate.zone),
@@ -5588,7 +5589,7 @@ ch4 &lt;- pbreplicate(N, { ## pbreplicate gives a progress bar
         mutate(incr.methanotrophy.co2.mean = methanotrophy.co2.2010.mean - methanotrophy.co2.tmdl.mean) 
     ) %&gt;% 
     group_by(type, climate.zone) %&gt;% 
-    summarize(incr.ch4.mean               = mean(incr.ch4.mean, na.rm = T),
+    summarize(incr.ch4.mean.pct           = mean(incr.ch4.mean.pct, na.rm = T),
               incr.methanotrophy.co2.mean = mean(incr.methanotrophy.co2.mean, na.rm = T),
               .groups = &#39;drop&#39;)
   
@@ -5665,7 +5666,7 @@ N = 1e4
 for (i in 1:N) {
   
   ## print where you are in the loop
-  print(i)
+  # print(i)
   
   ## distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
@@ -5714,10 +5715,10 @@ for (i in 1:N) {
                     .groups = &#39;drop&#39;),
         by = c(&#39;type&#39;, &#39;climate.zone&#39;)
       ) %&gt;% 
-        mutate(incr.co2.mean = preds_2010_lakes - preds_tmdl_lakes) 
+        mutate(incr.co2.mean = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
     ) %&gt;% 
     group_by(type, climate.zone) %&gt;% 
-    summarize(incr.co2.mean = mean(incr.co2.mean, na.rm = T),
+    summarize(incr.co2.mean.pct = mean(incr.co2.mean, na.rm = T),
               .groups = &#39;drop&#39;) %&gt;% 
     ungroup 
   
@@ -5823,11 +5824,11 @@ n2o &lt;- pbreplicate(N, {
           summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
                     .groups = &#39;drop&#39;),
         by = c(&#39;type&#39;, &#39;climate.zone&#39;)
-      )
+      ) %&gt;% 
+        mutate(incr.n2o.mean.pct = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
     ) %&gt;% 
-    mutate(incr.n2o.mean = preds_2010_lakes - preds_tmdl_lakes) %&gt;% 
     group_by(type, climate.zone) %&gt;% 
-    summarize(incr.n2o.mean = mean(incr.n2o.mean, na.rm = T),
+    summarize(incr.n2o.mean.pct = mean(incr.n2o.mean.pct, na.rm = T),
               .groups = &#39;drop&#39;) %&gt;% 
     ungroup 
   

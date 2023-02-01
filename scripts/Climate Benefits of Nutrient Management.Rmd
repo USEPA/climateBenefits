@@ -632,7 +632,7 @@ dat[1:5,] %>% dplyr::select(WB_ID, contains("ch4")) %>%
 ### Upscale to mg GHG day^-1^
 The next step is to convert the areal emission rates (mg GHG m^-2^ day^-1^) to a daily emission (mg GHG day^-1^) for each waterbody.  
 ``` {r}
-dat <- dat %>% mutate(
+dat %<>% mutate(
   # CH4
   # 2010: upscale to per lake per day emissions
   ch42010.lk.d = ch42010 * 1e6 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
@@ -738,7 +738,7 @@ dat.sum %>% dplyr::select(matches("ch4.*.yr")) %>%
 The 'incremental change' is defined as the difference in emissions between the '2010' and 'TMDLnew' scenarios.  The mean incremental change is simply calculated as the difference between the model predicted 'mean' values.  The upper 97.5 percentile of the incremental change can be calculated as the difference between the 2010 97.5 percentile and the TMDLnew 97.5 percentile.  The lower 2.5 percentile can be calculated as the difference between the 2010 and TMDLnew lower 2.5 percentile.
 <!-- This calculation leads to very wide confidence intervals, including negative values for N~2~O and CO~2~.  This is probably not the best way to estimate uncertainty; however, the 'mean' estimates should be pretty good. -->
 ```{r}
-dat.sum <- dat.sum %>%
+dat.sum %<>%
   # incremental change (metric tons yr-1)
   mutate(ch4incr.yr = ch42010.yr.sum - ch4TMDLnew.yr.sum, 
          ch4incr.yr.upr = ch42010.yr.upr.sum - ch4TMDLnew.yr.upr.sum, 
@@ -866,6 +866,7 @@ emissions.by.type.ch4 = tibble()
 set.seed(42)
 
 ## number of simulations
+# N = 10
 N = 1e4
 
 ch4 <- pbreplicate(N, { ## pbreplicate gives a progress bar
@@ -963,13 +964,13 @@ ch4 <- pbreplicate(N, { ## pbreplicate gives a progress bar
       emissions.by.type.ch4,
       left_join(
         left_join(
-          aggregate(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, 
+          aggregate((preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes)/preds_2010_lakes$preds_2010_lakes, 
                     list(preds_2010_lakes$type, 
                          preds_2010_lakes$climate.zone), 
                     FUN = mean) %>% 
             rename(type         = Group.1,
                    climate.zone = Group.2, 
-                   incr.ch4.mean = x),
+                   incr.ch4.mean.pct = x),
           aggregate((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
                     list(preds_2010_lakes$type,
                          preds_2010_lakes$climate.zone),
@@ -991,7 +992,7 @@ ch4 <- pbreplicate(N, { ## pbreplicate gives a progress bar
         mutate(incr.methanotrophy.co2.mean = methanotrophy.co2.2010.mean - methanotrophy.co2.tmdl.mean) 
     ) %>% 
     group_by(type, climate.zone) %>% 
-    summarize(incr.ch4.mean               = mean(incr.ch4.mean, na.rm = T),
+    summarize(incr.ch4.mean.pct           = mean(incr.ch4.mean.pct, na.rm = T),
               incr.methanotrophy.co2.mean = mean(incr.methanotrophy.co2.mean, na.rm = T),
               .groups = 'drop')
   
@@ -1068,7 +1069,7 @@ N = 1e4
 for (i in 1:N) {
   
   ## print where you are in the loop
-  print(i)
+  # print(i)
   
   ## distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
@@ -1117,10 +1118,10 @@ for (i in 1:N) {
                     .groups = 'drop'),
         by = c('type', 'climate.zone')
       ) %>% 
-        mutate(incr.co2.mean = preds_2010_lakes - preds_tmdl_lakes) 
+        mutate(incr.co2.mean = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
     ) %>% 
     group_by(type, climate.zone) %>% 
-    summarize(incr.co2.mean = mean(incr.co2.mean, na.rm = T),
+    summarize(incr.co2.mean.pct = mean(incr.co2.mean, na.rm = T),
               .groups = 'drop') %>% 
     ungroup 
   
@@ -1226,11 +1227,11 @@ n2o <- pbreplicate(N, {
           summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
                     .groups = 'drop'),
         by = c('type', 'climate.zone')
-      )
+      ) %>% 
+        mutate(incr.n2o.mean.pct = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
     ) %>% 
-    mutate(incr.n2o.mean = preds_2010_lakes - preds_tmdl_lakes) %>% 
     group_by(type, climate.zone) %>% 
-    summarize(incr.n2o.mean = mean(incr.n2o.mean, na.rm = T),
+    summarize(incr.n2o.mean.pct = mean(incr.n2o.mean.pct, na.rm = T),
               .groups = 'drop') %>% 
     ungroup 
   
