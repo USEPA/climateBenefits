@@ -1,22 +1,25 @@
-# Climate Benefits of Nutrient Management: A Case Study in the Chesapeake Bay Watershed
+# Climate Benefits of Nutrient Management in North America’s Largest Estuary
 
 ## Jake Beaulieu (US EPA ORD), Elizabeth Kopits (US EPA NCEE), Chris Moore (US EPA NCEE), Bryan Parthum (US EPA NCEE)
 
 This repo contains data and code for estimating climate benefits of nutrient management. A summary of the results and methods can be found in the summary document `store/Climate-Benefits-of-Nutrient-Management.html`. 
 
-> **Abstract:** Eutrophication in lakes and reservoirs contributes to emissions of carbon dioxide, methane, and nitrous oxide.  Surface water regulations that reduce nutrient loadings also reduce eutrophication and associated GHG emissions, but this benefit has not been quantified or monetized.  This project will combine results from the Northeast Lakes Model (an extension of SPARROW), models linking eutrophication to GHG emissions, and estimated values for the social costs of carbon dioxide, methane and nitrous oxide to value the climate benefits of the Chesapeake Bay TMDL.  
-
-Click on the "fork" button at the very top right of the page to create an independent copy of the repo within your own GitHub account. Alternatively, click on the green "clone or download" button just below that to download the repo to your local computer.
+> **Abstract:** 
+> Eutrophication in lakes and reservoirs contributes to emissions of carbon dioxide, methane, and nitrous oxide. Water management policies that reduce nutrient loadings also reduce eutrophication and associated greenhouse gas (GHG) emissions. These reductions in GHG emissions have not, to date, been considered when evaluating the costs and benefits of a proposed policy. We integrate biophysical and economic models to estimate the previously unquantified climate benefits of a large nutrient management program in the northeastern United States. The climate benefits of the policy are estimated to be between $207 million to 484 million (2020USD, 2% discount rate) over the first 50 years of the management program. Our estimates suggest that reductions in GHG emissions from nutrient management programs should be taken into account in helping to meet regional, national, and global GHG mitigation goals.  
 
 ## Requirements
+1. *R* is free and available for download [here](https://www.r-project.org/). The *RStudio* integrated development environment is useful for replication, it is free and available for download [here](https://www.rstudio.com/products/rstudio/). *R* is used to collect the estimates from each damage module and create a table of annual SC-HFCs. 
 
-The analysis is written in *R*. Data is stored as *.rds*.
+2. Optional: *Github* is free and available for download [here](https://github.com/git-guides/install-git). *Github* is used to house this repository and by installing and using it to clone the repository one will simplify the replication procedure. However, a user could also simply download a zipped file version of this repository, unzip in the desired location and follow the replication procedures outlined below.
 
-*R* is free, open-source and available for download [here](https://www.r-project.org/).
+## Getting Started
+Begin by cloning this repository. This can be done by clicking on the green "code" button in this repository and following those instructions, or by navigating in the terminal via the command line to the desired location of the cloned repository and then typing: 
 
-## Problems
+```
+git clone https://github.com/USEPA/climateBenefits.git
+```
 
-If any errors are discovered, please submit an issue. Thank you, and enjoy!
+Alternatively, you can make a `fork` of this repository. This allows for developemnt on the `fork` while preserving its relationship with this repository.
 
 ## License
 
