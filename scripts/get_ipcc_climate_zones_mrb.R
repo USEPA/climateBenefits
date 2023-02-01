@@ -62,10 +62,14 @@ lake.points =
   lakes.mrb %>% 
   st_centroid
 
+## export
+lakes.mrb %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb.shp')
+lake.points %>% st_write('store/ndh_in_mrb/nhd_lakes_in_mrb_as_points.shp')
+
 ## get climate zones from ipcc
 zones = 
   st_read('store/climateMap/ipcc_zones_2017_names.shp') %>% 
-  st_transform(lake.points)
+  st_transform(st_crs(lake.points))
 
 # ## test plot
 # zones %>%
@@ -85,7 +89,7 @@ data =
             join = st_within) %>% 
       st_drop_geometry %>% 
       as_tibble %>% 
-      select(COMID, clmt_zn) %>% 
+      dplyr::select(COMID, clmt_zn) %>% 
       rename(climate.zone = clmt_zn),
     by = 'COMID'
   )
