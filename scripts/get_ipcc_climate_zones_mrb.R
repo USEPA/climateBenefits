@@ -47,8 +47,8 @@ watershed =
 # ## trim lakes to watershed
 # ## start clock
 # start.filter.time <- proc.time()
-# lakes.mrb = 
-#   lakes %>% 
+# lakes.mrb =
+#   lakes %>%
 #   st_filter(watershed, .pred = st_intersect)
 # ## stop clock
 # filter.time = proc.time() - start.filter.time
