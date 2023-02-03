@@ -11,6 +11,7 @@ store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb/
 ## large mississippi shape files
 *nhd_lakes_in_mrb.shp
 *ghg_waterbodies_in_mrb.shp
+*mrb_emissions_reductions
 
 ## large plot in svg, png is smaller tho
 *climate_zones_mrb.svg
