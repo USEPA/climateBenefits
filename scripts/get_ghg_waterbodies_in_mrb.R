@@ -85,7 +85,7 @@ read.time
 gc()
 
 ## trim to only states in the mrb
-national %>% filter(stusps %in% mrb.states)
+national %<>% filter(stusps %in% mrb.states)
 
 ## check distinct types of waterbodies
 national %>% st_drop_geometry %>% dplyr::select(subtype) %>% table
