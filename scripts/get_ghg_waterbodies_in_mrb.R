@@ -9,7 +9,8 @@ gc()
 ## this function will check if a package is installed, and if not, install it
 list.of.packages <- c('magrittr','tidyverse',
                       'sf',
-                      'arrow')
+                      'arrow',
+                      'doParallel')
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages, repos = "http://cran.rstudio.com/")
 lapply(list.of.packages, library, character.only = TRUE)
@@ -136,6 +137,10 @@ gc()
 # }
 
 ###### set Up Cluster ######
+
+## start clock: took 2.9 hours on 4 cores and 32GB of RAM
+time1 = Sys.time()
+
 ## parallel filtering of waterbodies by state
 ## set cores
 # n.cores = parallel::detectCores()-1
@@ -146,9 +151,6 @@ my.cluster = parallel::makeCluster(n.cores, type = "PSOCK")
 
 ## register cluster to be used by %dopar%
 doParallel::registerDoParallel(cl = my.cluster)
-
-## start clock
-time1 = Sys.time()
 
 ## start parallel
 foreach(
@@ -169,10 +171,10 @@ foreach(
     write_parquet(paste0('output/ghg_in_mrb/ghg_in_mrb_', STATE, '.parquet'))
 }
 
-## stop clock
-Sys.time() - time1
-
 ## stop cluster
 parallel::stopCluster(cl = my.cluster)
+
+## stop clock
+Sys.time() - time1
 
 ## end of script. have a great day!
