@@ -4,17 +4,17 @@ maps/chesData_and_NHD.html
 
 ## large nhd file
 store/NHDPlusV21_National_Seamless_Flattened_Lower48*
-*Rproj.user*
+*Rproj.user
 
 ## large mississippi shape files
 *nhd_lakes_in_mrb.shp
 *ghg_waterbodies_in_mrb.shp
-*mrb_emissions_reductions
+mrb_emissions_reductions/
 
 ## large plot in svg, png is smaller tho
 *climate_zones_mrb.svg
 
 ## other misc
-matlab
-renv
+matlab/
+renv/
 Analytic*blueprint
