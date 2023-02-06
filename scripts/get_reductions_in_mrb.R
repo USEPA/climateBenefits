@@ -18,7 +18,7 @@ lapply(list.of.packages, library, character.only = TRUE)
 #################### parts
 ##########################
 
-## function to clean give data
+## function to read all files in a directory
 read_mrb_waterbodies = function(x) {
   read_parquet(x, show_col_types = F)
 }
