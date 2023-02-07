@@ -26,11 +26,10 @@ colors = c("#E69F00", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#9
 font_add_google("Quattrocento Sans", "sans-serif")
 showtext_auto()
 
-x = "output/mrb_emissions_reductions/mrb_emissions_reductions_AL.shp"
 ## function to read all files in a directory
 read_all_sf = function(x) {
-  read_sf(x) %>% 
-    st_simplify(dTolerance = 2000)
+  read_sf(x) #%>% 
+  # st_simplify(preserveTopology = T, dTolerance = 0.001) 
 }
 
 ##########################
@@ -41,35 +40,42 @@ read_all_sf = function(x) {
 watershed.mrb = 
   st_read('store/Miss_RiverBasin/Miss_RiverBasin.shp') %>% 
   mutate(aes = 'Mississippi River Basin')
-watershed.cb  = 
-  st_read('maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp') %>% 
-  mutate(aes = 'Chesapeake Bay Watershed') %>%
-  st_transform(crs = st_crs(watershed.mrb))
+# watershed.cb  = 
+#   st_read('maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp') %>% 
+#   mutate(aes = 'Chesapeake Bay Watershed') %>%
+#   st_transform(crs = st_crs(watershed.mrb))
 
 ## get state polygons
-us.states = subset(USAboundaries::us_states(),
-                   !name %in% c("United States Virgin Islands",
-                                "Commonwealth of the Northern Mariana Islands",
-                                "Guam",
-                                "American Samoa",
-                                "Puerto Rico",
-                                "Alaska",
-                                "Hawaii")) %>%
+us.states = 
+  subset(USAboundaries::us_states(),
+         !name %in% c("United States Virgin Islands",
+                      "Commonwealth of the Northern Mariana Islands",
+                      "Guam",
+                      "American Samoa",
+                      "Puerto Rico",
+                      "Alaska",
+                      "Hawaii")) %>%
   st_transform(crs = st_crs(watershed.mrb))
 
 ## trim watershed boundaries
 watershed.mrb %<>% st_intersection(us.states)
-watershed.cb  %<>% st_intersection(us.states)
+# watershed.cb  %<>% st_intersection(us.states)
 
 ## results from get_reductions_in_mrb
+start.read.time <- proc.time()
 data.mrb = 
   list.files('output/mrb_emissions_reductions/', pattern = "*.shp", full.names = T) %>%
   map_df(~read_all_sf(.))
+## stop clock
+read.time = proc.time() - start.read.time
 
-## drop outliers
-data.mrb %<>% 
-  filter(between(ch4_rdc, quantile(data.mrb$ch4_rdc, 0.25), quantile(data.mrb$ch4_rdc, 0.75)),
-         ar_h_nw > quantile(data.mrb$ar_h_nw, 0.05))
+## check read time; 9 minutes
+print('time it took to read and simplify data: ')
+read.time
+
+# ## drop outliers
+# data.mrb %<>% 
+#   filter(between(ch4_rdc, quantile(data.mrb$ch4_rdc, 0.25), quantile(data.mrb$ch4_rdc, 0.75))) ## drop outer quartiles to reduce size
 
 ## share crs
 data.mrb %<>%
@@ -81,6 +87,14 @@ gc()
 ##########################
 ##################### plot
 ##########################
+
+# data.mrb %>% 
+#   ggplot() + 
+#   geom_sf(data  = data.mrb[1:3000,],
+#           aes(color = ch4_rdc,
+#               fill  = ch4_rdc)) + 
+#   coord_sf(crs = st_crs(watershed.mrb), lims_method = "geometry_bbox")
+
 
 plot =
   ggplot() +

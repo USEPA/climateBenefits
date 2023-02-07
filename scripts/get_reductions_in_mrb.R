@@ -148,4 +148,21 @@ for(STATE in mrb.states){
     write_parquet(paste0('output/mrb_emissions_reductions_text/mrb_emissions_reductions_text_', STATE, '.parquet'))
 }
 
+
+## read results by state as text files
+## function to read all files in a directory
+read_all = 
+  function(x) {
+    read_parquet(x)
+  }
+
+data = 
+  list.files('output/mrb_emissions_reductions_text', pattern = "*.parquet", full.names = T) %>%
+  map_df(~read_all(.))
+
+## get results 
+data %>% 
+  select(ch4.reduction, co2.reduction) %>% 
+  summarise_all(sum, na.rm = T)
+
 ## end of script. have a great day! 
