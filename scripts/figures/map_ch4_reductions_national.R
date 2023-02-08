@@ -10,7 +10,7 @@ gc()
 list.of.packages <- c('magrittr','tidyverse',
                       'stringr',
                       'sf','USAboundaries',
-                      'ggplot2','ggpubr','ggnewscale','scales','showtext', 'ggsn', 'cowplot','RColorBrewer')
+                      'ggplot2','ggpubr','ggnewscale','scales','showtext', 'ggsn', 'cowplot','RColorBrewer','ggrepel')
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages, repos = "http://cran.rstudio.com/")
 lapply(list.of.packages, library, character.only = TRUE)
@@ -88,14 +88,7 @@ gc()
 ##################### plot
 ##########################
 
-# data.mrb %>% 
-#   ggplot() + 
-#   geom_sf(data  = data.mrb[1:3000,],
-#           aes(color = ch4_rdc,
-#               fill  = ch4_rdc)) + 
-#   coord_sf(crs = st_crs(watershed.mrb), lims_method = "geometry_bbox")
-
-
+## total ch4 reductions
 plot =
   ggplot() +
   geom_sf(data  = watershed.mrb,
@@ -148,5 +141,118 @@ plot =
 ## export
 # ggsave("output/figures/results_mrb_ch4.svg", plot, width  = 9, height = 6)
 ggsave("output/figures/results_mrb_ch4.png", plot, width  = 9, height = 6)
+
+## collect garbage
+gc()
+
+# ## total ch4 reductions per hectare drop upper and lower 2.5%
+# data.mrb.2  = 
+#   data.mrb %>%
+#   mutate(ch4.per.hec = ch4_rdc/ar_h_nw) %>% 
+#   filter(between(ch4.per.hec, quantile(ch4.per.hec, 0.025), quantile(ch4.per.hec, 0.975)))
+#         
+# data.mrb.2 %>% st_drop_geometry %>% summary
+# 
+# plot =
+#   ggplot() +
+#   geom_sf(data  = watershed.mrb,
+#           aes(color = aes,
+#               fill  = aes),
+#           alpha = 0.08) +
+#   # geom_sf(data  = watershed.cb,
+#   #         aes(color = aes,
+#   #             fill  = aes),
+#   #         alpha = 0.08) +
+#   geom_sf(data  = us.states,
+#           color = 'grey20',
+#           alpha = 0.05) +
+#   scale_color_manual(values = c('#56B4E9', '#9DBF9E'),
+#                      guide   = guide_legend(title = '',
+#                                             nrow = 2)) +
+#   scale_fill_manual(values = c('#56B4E9', '#9DBF9E'),
+#                     guide   = guide_legend(title = '',
+#                                            nrow = 2)) +
+#   new_scale_color() +
+#   new_scale_fill() +
+#   geom_sf(data  = data.mrb.2,
+#           aes(color = ch4_rdc/ar_h_nw,
+#               fill  = ch4_rdc/ar_h_nw)) +
+#   scale_color_distiller(palette = 'Spectral',
+#                         guide   = guide_colorbar(title          = expression(paste('Annual Reductions in  ', CH[4], ' Emissions (tonnes/hectare)')),
+#                                                  title.position = 'top',
+#                                                  barwidth       = unit(8.3, 'cm'))) +
+#   scale_fill_distiller(palette = 'Spectral',
+#                        guide   = guide_colorbar(title          = expression(paste('Annual Reductions in  ', CH[4], ' Emissions (tonnes/hectare)')),
+#                                                 title.position = 'top',
+#                                                 barwidth       = unit(8.3, 'cm'))) +
+#   north(data     = us.states,
+#         location = "bottomright") +
+#   scalebar(data      = us.states,
+#            location  = "bottomleft",
+#            transform = F,
+#            dist      = 250,
+#            dist_unit = 'mi',
+#            family    = 'sans-serif',
+#            st.size   = 8) +
+#   theme_void() +
+#   theme(legend.position = 'bottom',
+#         legend.title     = element_text(size = 32, color='grey20'),
+#         legend.text      = element_text(size = 32, color='grey20'),
+#         plot.caption     = element_text(size = 32, hjust = 0.5),
+#         plot.title       = element_text(size = 32, hjust = 0.5),
+#         text             = element_text(family = 'sans-serif', color = 'grey20'))
+# 
+# ## export
+# # ggsave("output/figures/results_mrb_ch4.svg", plot, width  = 9, height = 6)
+# ggsave("output/figures/results_mrb_ch4_per_hectare_omit_outliers.png", plot, width  = 9, height = 6)
+
+
+## total ch4 reductions per hectare scatter
+## get top 5
+top5 =
+  data.mrb %>%  
+  st_drop_geometry %>% 
+  arrange(desc(ch4_rdc)) %>% 
+  slice(1:5) %>% 
+  .$globald
+
+plot = 
+  data.mrb %>% 
+  st_drop_geometry %>% 
+  ggplot() +
+  geom_point(aes(x     = ch4_rdc,
+                 y     = ar_h_nw,
+                 color = climate)) +
+  geom_text_repel(data = subset(data.mrb, globald %in% top5), 
+                  aes(x     = ch4_rdc,
+                      y     = ar_h_nw,
+                      label = globald)) +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  labs(x = expression(paste('Annual Reductions in  ', CH[4], ' Emissions (tonnes)')),
+       y = 'Waterbody Surface Area (hectares)',
+       color = '') +
+  theme_minimal() +
+  theme(legend.position = 'bottom',
+        # legend.justification = c(1, 0),
+        legend.title     = element_text(size = 14, color='grey20'),
+        legend.text      = element_text(size = 16, color='grey20'),
+        legend.key.size  = unit(1, 'cm'),
+        legend.margin    = margin(0, 0, 0, 0),
+        axis.title       = element_text(size = 24),
+        axis.text        = element_text(size = 24),
+        axis.line.x      = element_line(color = "black"),
+        axis.ticks.x     = element_line(color = "black", size = 1),
+        strip.text.x     = element_text(size = 13), 
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = 'grey70', linetype = "dotted"),
+        panel.grid.minor = element_blank(),
+        plot.caption     = element_text(size = 12, hjust = 0.5),
+        plot.title       = element_text(size = 12, hjust = 0.5),
+        text             = element_text(family = "sans-serif", color = 'grey20')) +
+  guides(color = guide_legend(nrow = 3))
+
+## export
+ggsave("output/figures/results_mrb_ch4_per_hectare_scatter.png", plot, width  = 5, height = 5)
 
 ## end of script. have a great day! 
