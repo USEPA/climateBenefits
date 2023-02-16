@@ -632,7 +632,7 @@ dat[1:5,] %>% dplyr::select(WB_ID, contains("ch4")) %>%
 ### Upscale to mg GHG day^-1^
 The next step is to convert the areal emission rates (mg GHG m^-2^ day^-1^) to a daily emission (mg GHG day^-1^) for each waterbody.  
 ``` {r}
-dat <- dat %>% mutate(
+dat %<>% mutate(
   # CH4
   # 2010: upscale to per lake per day emissions
   ch42010.lk.d = ch42010 * 1e6 * AREASQKM, # 1000000m2 = 1km2.  mg CH4 d-1
@@ -738,7 +738,7 @@ dat.sum %>% dplyr::select(matches("ch4.*.yr")) %>%
 The 'incremental change' is defined as the difference in emissions between the '2010' and 'TMDLnew' scenarios.  The mean incremental change is simply calculated as the difference between the model predicted 'mean' values.  The upper 97.5 percentile of the incremental change can be calculated as the difference between the 2010 97.5 percentile and the TMDLnew 97.5 percentile.  The lower 2.5 percentile can be calculated as the difference between the 2010 and TMDLnew lower 2.5 percentile.
 <!-- This calculation leads to very wide confidence intervals, including negative values for N~2~O and CO~2~.  This is probably not the best way to estimate uncertainty; however, the 'mean' estimates should be pretty good. -->
 ```{r}
-dat.sum <- dat.sum %>%
+dat.sum %<>%
   # incremental change (metric tons yr-1)
   mutate(ch4incr.yr = ch42010.yr.sum - ch4TMDLnew.yr.sum, 
          ch4incr.yr.upr = ch42010.yr.upr.sum - ch4TMDLnew.yr.upr.sum, 
@@ -820,8 +820,20 @@ An alternative approach to estimating uncertainty is to exploit the uncertainty 
 <!-- Economic and Statistics 68: 715-719. -->
 
 ```{r results='hide', message=FALSE, warning=FALSE}
-datKR <- inner_join(as_tibble(dat.sf), as_tibble(iceCover))
-lakes <- datKR %>% dplyr::select(WB_ID,AREASQKM,day_of_ice_filled)
+## build data for simulation
+datKR =
+  inner_join(as_tibble(dat.sf), 
+             as_tibble(iceCover))
+
+## get lake data, add climate zone and type
+lakes =
+  left_join(
+    datKR %>% 
+      dplyr::select(WB_ID, AREASQKM, day_of_ice_filled),
+    read_csv('store/climate_zones_for_ches_waterbodies.csv') %>% 
+      mutate(WB_ID = as.character(WB_ID)),
+    by = 'WB_ID'
+  )
 
 #####################################
 ################################  CH4
@@ -846,8 +858,18 @@ dat_tmdl <-  datKR %>%
   as.matrix()
 
 ####  PREDICTIONS
+
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.ch4 = tibble()
+
+## set seed for replication
 set.seed(42)
-ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
+
+## number of simulations
+# N = 10
+N = 1e4
+
+ch4 <- pbreplicate(N, { ## pbreplicate gives a progress bar
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
@@ -872,7 +894,7 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
   # ch4.winter <- rnorm(n = nrow(lakes), mean = 10.56, sd = 11.52) # mg CH4 m-2 d-1
   ## we want a truncated normal such that winter rates don't extend beyond the tails of the summer emission rates
   # set.seed(42)
-  ch4.winter.truncated <- rtruncnorm(n=nrow(lakes), a=-1, b=4e3, mean=10.56, sd=11.52)
+  ch4.winter.truncated <- rtruncnorm(n = nrow(lakes), a = -1, b = 4e3, mean = 10.56, sd = 11.52)
   
   ## plot histogram comparing normal to truncated normal
   # b <- min(c(ch4.winter,ch4.winter.t)) - 0.001 # Set the minimum for the breakpoints
@@ -903,8 +925,8 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
     mutate(preds_2010_lakes = # calculated in units of mg CH4 per year
              # first half of summation is mg CH4 produced during open-water conditions (cold + warm days)
              ((((preds_2010_lakes * warm.days) + (ch4.winter.truncated * (cold.days - day_of_ice_filled))) ) +   
-             # second half of summation is mg CH4 produced under ice that remains after methanotrophy
-             (ch4.winter.truncated * day_of_ice_filled * (1-ch4.prop.methantrophy))) * 
+                # second half of summation is mg CH4 produced under ice that remains after methanotrophy
+                (ch4.winter.truncated * day_of_ice_filled * (1-ch4.prop.methantrophy))) * 
              1e6 * AREASQKM) #1000000m2=1km2.
   
   preds_tmdl_lakes %<>% 
@@ -915,8 +937,10 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
                 ((ch4.winter.truncated * tmdl.winter) * day_of_ice_filled * (1 - ch4.prop.methantrophy))) * # add ch4 that remains after methanotrophy (mg CH4/m2)
              1e6 * AREASQKM) #1000000m2=1km2.
   
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
   
   # preds_2010_lakes %<>% mutate(preds_2010_lakes = ((preds_2010_lakes * (7*30)) + # emissions during 7 warm months (April 1 - Nov. 1)
   #                                                    (ch4.winter * ((5*30)-day_of_ice_filled))) * # 5 months of open-water winter rates, discounted by days of ice
@@ -933,7 +957,45 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
   
   # ## Convert and take difference in predictions and sum across all lakes
   # sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
-  # 
+  
+  ## export climate zone specific emissions to extrapolate to mississippi river basin
+  emissions.by.type.ch4 = 
+    bind_rows(
+      emissions.by.type.ch4,
+      left_join(
+        left_join(
+          aggregate((preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes)/preds_2010_lakes$preds_2010_lakes, 
+                    list(preds_2010_lakes$type, 
+                         preds_2010_lakes$climate.zone), 
+                    FUN = mean) %>% 
+            rename(type         = Group.1,
+                   climate.zone = Group.2, 
+                   incr.ch4.mean.pct = x),
+          aggregate((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
+                    list(preds_2010_lakes$type,
+                         preds_2010_lakes$climate.zone),
+                    FUN = mean) %>% 
+            rename(type         = Group.1,
+                   climate.zone = Group.2,
+                   methanotrophy.co2.2010.mean = x), 
+          by = c('type', 'climate.zone')
+        ),
+        aggregate((ch4.winter.truncated * tmdl.winter * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
+                  list(preds_2010_lakes$type,
+                       preds_2010_lakes$climate.zone),
+                  FUN = mean) %>% 
+          rename(type         = Group.1,
+                 climate.zone = Group.2, 
+                 methanotrophy.co2.tmdl.mean = x), 
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.methanotrophy.co2.mean = methanotrophy.co2.2010.mean - methanotrophy.co2.tmdl.mean) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.ch4.mean.pct           = mean(incr.ch4.mean.pct, na.rm = T),
+              incr.methanotrophy.co2.mean = mean(incr.methanotrophy.co2.mean, na.rm = T),
+              .groups = 'drop')
+  
   ## Convert and take difference in predictions and sum across all lakes and store CO2 from methanotrophy
   list(
     # CH4 incremental change, summed across all lakes
@@ -941,8 +1003,8 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
     # CO2 produced via methanotrophy under ice in 2010
     methanotrophy.co2.2010 = sum((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16), na.rm=TRUE) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg,
     # co2 produced via methanotrophy under ice in tmdl scenario
-    methanotrophy.co2.tmdl =   sum(((ch4.winter.truncated * tmdl.winter) * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16), na.rm=TRUE) / (1e3*1e3*1e3) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
-  )
+    methanotrophy.co2.tmdl =   sum(((ch4.winter.truncated * tmdl.winter) * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16), na.rm=TRUE) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    emissions.by.type.ch4)
   ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
 })
 
@@ -950,10 +1012,17 @@ ch4 <- pbreplicate(1e4, { #1e4.  pbreplicate give progress bar
 diff_ch4 = unlist(ch4[1,]) # 1 MG = 1 metric ton = 1000kg
 co2.from.ch4.2010 = unlist(ch4[2,]) # 1 MG = 1 metric ton = 1000kg
 co2.from.ch4.tmdl = unlist(ch4[3,]) # 1 MG = 1 metric ton = 1000kg
+emissions.by.type.ch4 = ch4[4, N] ## keep just the final mean... clearly a cleaner way but this works
 
+## check values
 summary(diff_ch4)
 summary(co2.from.ch4.2010)
 summary(co2.from.ch4.tmdl)
+emissions.by.type.ch4
+
+## clean house
+rm(ch4)
+gc()
 
 #####################################
 ################################  CO2
@@ -961,7 +1030,8 @@ summary(co2.from.ch4.tmdl)
 
 #### PARTS 
 ## 2010 Data
-dat_2010 <-  datKR %>%
+dat_2010 =
+  datKR %>%
   dplyr::select(Pvv2010,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -973,7 +1043,8 @@ dat_2010 <-  datKR %>%
   as.matrix()
 
 ## TMDL Data
-dat_tmdl <-  datKR %>%
+dat_tmdl =
+  datKR %>%
   dplyr::select(PvvTMDLnew,AREASQKM) %>%
   mutate('(Intercept)'=1,
          AREASQKM = log10(AREASQKM),
@@ -985,15 +1056,25 @@ dat_tmdl <-  datKR %>%
   as.matrix()
 
 ####  PREDICTIONS
-set.seed(42)
-diff_co2 <- NULL # empty object to collect results
-# using for loop because i need to reference index i.
-  for (i in 1:10000) { #10000
-  print(i)
-  ## Distribution of coefficients 
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.co2 = tibble()
+
+## empty object to collect results
+diff_co2 <- NULL 
+
+## number of simulations
+N = 1e4
+
+## using for loop because i need to reference index i.
+for (i in 1:N) {
+  
+  ## print where you are in the loop
+  # print(i)
+  
+  ## distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
   
-  ## Predictions based on model uncertainty
+  ## predictions based on model uncertainty
   preds_2010_lakes <- cbind(lakes,
                             dat_2010 %*% coefs)
   preds_tmdl_lakes <- cbind(lakes,
@@ -1007,40 +1088,65 @@ diff_co2 <- NULL # empty object to collect results
   
   #################################
   #################################
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = pCo2(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = pCo2(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
+  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
   
   # CO2 produced during open-water periods
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-                                 1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-                                 1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
+  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
+  
+  ## store emissions by type
+  emissions.by.type.co2 =
+    bind_rows(
+      emissions.by.type.co2,
+      left_join(
+        preds_2010_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_2010_lakes = mean(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        preds_tmdl_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.co2.mean = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.co2.mean.pct = mean(incr.co2.mean, na.rm = T),
+              .groups = 'drop') %>% 
+    ungroup 
   
   # Add CO2 produced from methanotrophy
   # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
-  ######DO WE WANT TO CAPTURE LAKE SPECIFIC RESULTS, OR JUST AGGREGATE ACROSS THE WATERSHED?
-  preds_2010_lakes <- preds_2010_lakes %>% 
-    summarize(preds_2010_lakes = sum(preds_2010_lakes / (1e3*1e3*1e3))) %>%
-                mutate(preds_2010_lakes = preds_2010_lakes + co2.from.ch4.2010[i]) 
-  preds_tmdl_lakes <- preds_tmdl_lakes %>%
-    summarize(preds_tmdl_lakes = sum(preds_tmdl_lakes / (1e3*1e3*1e3))) %>%
+  preds_2010_lakes %<>% 
+    summarize(preds_2010_lakes = sum(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T)) %>%
+    mutate(preds_2010_lakes = preds_2010_lakes + co2.from.ch4.2010[i]) 
+  
+  preds_tmdl_lakes %<>%
+    summarize(preds_tmdl_lakes = sum(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T)) %>%
     mutate(preds_tmdl_lakes = preds_tmdl_lakes + co2.from.ch4.tmdl[i])
   
-  ## Convert and take difference in predictions and sum across all lakes
-  diff_co2[i] <- sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
+  ## convert and take difference in predictions and sum across all lakes
+  diff_co2[i] <- sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T)
   
-  ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
 }
 
-# inspect results
+## inspect results
 summary(diff_co2)
-
+emissions.by.type.co2
 
 #####################################
 ################################  N20
 #####################################
-
-#### PARTS 
 
 ## 2010 Data
 dat_2010 <-  datKR %>%
@@ -1064,9 +1170,14 @@ dat_tmdl <-  datKR %>%
 
 
 ####  PREDICTIONS
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.n2o = tibble()
 
-set.seed(42)
-diff_n2o <- pbreplicate(1e4, { # 1e4
+## number of simulations
+N = 1e4
+
+## simulation
+n2o <- pbreplicate(N, {
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.n2o), Sigma = vcov(mod.n2o))
@@ -1083,37 +1194,79 @@ diff_n2o <- pbreplicate(1e4, { # 1e4
   # winter.  I think it best to assume 1) emissions during ice-cover are 0, and 2) emissions are 
   # equal to model predictions during the rest of the year.  
   
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = pN2o(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg N2O m-2 day-1
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg N2O m-2 day-1
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = pN2o(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg N2O m-2 day-1
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg N2O m-2 day-1
   
   # open water rates: mg N2O d-1
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days 
-                                 1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-                                 1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days 
+             1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
+             1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
   
   # unit conversion
-  preds_2010_lakes %<>% mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
-  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  
+  ## store emissions by type
+  emissions.by.type.n2o =
+    bind_rows(
+      emissions.by.type.n2o,
+      left_join(
+        preds_2010_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_2010_lakes = mean(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        preds_tmdl_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.n2o.mean.pct = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.n2o.mean.pct = mean(incr.n2o.mean.pct, na.rm = T),
+              .groups = 'drop') %>% 
+    ungroup 
   
   ## Convert and take difference in predictions and sum across all lakes
-  sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE)
-  
-  ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
+  list(
+    sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T),
+    emissions.by.type.n2o
+  )
 })
+
+diff_n2o = unlist(n2o[1,])
+emissions.by.type.n2o = n2o[2, N]
+
+## check values
 summary(diff_n2o)
+emissions.by.type.n2o
+
 ```
 
 ```{r}
-kr_simulations <- data.frame(mean_ch4 = round(mean(diff_ch4),0),
-                             uppr_ch4 = round(quantile(diff_ch4,.95),0),
-                             lowr_ch4 = round(quantile(diff_ch4,.05),0),
-                             mean_co2 = round(mean(diff_co2),0),
-                             uppr_co2 = round(quantile(diff_co2,.95),0),
-                             lowr_co2 = round(quantile(diff_co2,.05),0),
-                             mean_n2o = round(mean(diff_n2o),1),
-                             uppr_n2o = round(quantile(diff_n2o,.95),1),
-                             lowr_n2o = round(quantile(diff_n2o,.05),1))
+
+## export emissions by climate zone and type
+emissions.by.type.ch4[[1]] %>% write_csv('output/emissions_by_lake_characteristics_ch4.csv')
+emissions.by.type.co2 %>% write_csv('output/emissions_by_lake_characteristics_co2.csv')
+emissions.by.type.n2o[[1]] %>% write_csv('output/emissions_by_lake_characteristics_n2o.csv')
+
+kr_simulations <- data.frame(mean_ch4 = round(mean(diff_ch4), 0),
+                             uppr_ch4 = round(quantile(diff_ch4, .95), 0),
+                             lowr_ch4 = round(quantile(diff_ch4, .05), 0),
+                             mean_co2 = round(mean(diff_co2), 0),
+                             uppr_co2 = round(quantile(diff_co2, .95), 0),
+                             lowr_co2 = round(quantile(diff_co2, .05), 0),
+                             mean_n2o = round(mean(diff_n2o), 1),
+                             uppr_n2o = round(quantile(diff_n2o, .95), 1),
+                             lowr_n2o = round(quantile(diff_n2o, .05), 1))
 rownames(kr_simulations) <- c()
 
 kr_simulations %>%
