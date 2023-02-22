@@ -48,8 +48,12 @@ library(ncdf4) # reading in ice data
 library(ncdf4.helpers) # reading in ice data
 library(pbapply) # status updates for big ice data loop
 
-plan(multisession) # initiate parralell processing with future package
-options(future.globals.maxSize = +Inf)
+
+library(conflicted)
+conflicted::conflict_scout()
+conflict_prefer("select", "dplyr") # select() will call dplyr::select()
+conflict_prefer("filter", "dplyr") # filter() will call dplyr::filter()
+conflict_prefer("rename", "dplyr") # filter() will call dplyr::rename()
 
 # Define local path for each user.  Will enable reading data from 
 # 'Climate benefits of nutrient management' OneDrive folder maintained by Chris Moore
@@ -102,10 +106,13 @@ chl.p.summary %>% kbl(col.names = c("statistic", "2010 chl", "2010 TP", "2010 TN
 Each waterbody in the lake model output is uniquely identified by a 'WB_ID' value.  These values correspond to 'COMID' values in the NHDPlusV2 dataset, a spatial database of U.S. waterbodies.  Below we merge these data sets to combine the model output with other waterbody characteristics in NHDPlusV2, including waterbody surface areas.
 
 ``` {r results='hide', warning = FALSE, message = FALSE}
+# Clean this up.  This object is in .gitignore.  Reading from Bryan's repo
+# while it copies to climateBenefits_VM
+
 # 50 seconds
 nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                  layer = "NHDWaterbody") %>%
-  dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
+    dplyr::select(COMID, FDATE, RESOLUTION, # note, no OBJECTID when read with sf
                 GNIS_ID, GNIS_NAME, AREASQKM, 
                 ELEVATION, REACHCODE, FTYPE, FCODE,
                 ONOFFNET, PurpCode, PurpDesc,
@@ -825,7 +832,7 @@ An alternative approach to estimating uncertainty is to exploit the uncertainty 
 
 <!-- Krinsky, I and A. L. Robb. 1986. “On Approximating the Statistical Properties of Elasticities.” Review of -->
 <!-- Economic and Statistics 68: 715-719. -->
-
+#### CH4
 ```{r results='hide', message=FALSE, warning=FALSE}
 ## build data for simulation
 datKR =
@@ -882,12 +889,13 @@ set.seed(42)
 
 ## number of simulations
 #N = 10
-N = 1e4 # 9 minutes with pbreplicate on laptop, 2 minutes with future_replicate
+N = 1e4 # laptop: 9 minutes with pbreplicate, 2 minutes with future_replicate
+        # VM: 86 seconds with future_replicate
 
-
+plan("multisession") # parallel processing with future_replicate.
 
 tic()
-ch4 <- future_replicate(N, { ## pbreplicate gives a progress bar
+ch4 <- future_replicate(N, { ## future_replicate used parallel processing
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
@@ -1018,35 +1026,58 @@ ch4 <- future_replicate(N, { ## pbreplicate gives a progress bar
               incr.methanotrophy.co2.mean = mean(incr.methanotrophy.co2.mean, na.rm = T),
               .groups = 'drop')
   
+  ## This list will be populated with each iteration of the simulation and will be
+  ## assigned to the object 'ch4'
   ## Convert and take difference in predictions and sum across all lakes and store CO2 from methanotrophy
+  ## also catch lake-specific results from each iteration
   list(
-    # CH4 incremental change, summed across all lakes
+    # row 1:  CH4 incremental change, summed across all lakes
     incr.ch4 = sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE),
-    # CO2 produced via methanotrophy under ice in 2010
-    methanotrophy.co2.2010 = sum((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16), na.rm=TRUE) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg,
-    # co2 produced via methanotrophy under ice in tmdl scenario
-    methanotrophy.co2.tmdl =   sum(((ch4.winter.truncated * tmdl.winter) * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16), na.rm=TRUE) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    
+    # row 2:  CO2 produced via methanotrophy under ice in 2010
+    methanotrophy.co2.2010 = (ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    
+    # row 3:  CO2 produced via methanotrophy under ice in tmdl scenario
+    methanotrophy.co2.tmdl =   (ch4.winter.truncated * tmdl.winter * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    
+    # row 4:  emissions by IPCC categories for MRB extrapolation
     emissions.by.type.ch4,
-    preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes), # predict
+    
+    # row 5: lake specific results for 2010 scenario
+    preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
+    
+    # row 6:  lake specific results for tmdl scenario
     preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes))
-  ## THIS RETURNS A VECTOR OF PREDICTIONS FROM WHICH WE CAN CREATE CONFIDENCE INTERVALS
 })
 toc()
+plan("sequential") # turn off parallel processing
 
-## extract and name relevant vectors
+
+## EXTRACT AND NAME RELEVANT VECTORS------------------
 diff_ch4 = unlist(ch4[1,]) # 1 MG = 1 metric ton = 1000kg
-co2.from.ch4.2010 = unlist(ch4[2,]) # 1 MG = 1 metric ton = 1000kg
-co2.from.ch4.tmdl = unlist(ch4[3,]) # 1 MG = 1 metric ton = 1000kg
+
+# co2 from ch4 for each lake and simulation in 2010.  10000 simulations of ~4200 lakes
+co2.from.ch4.2010 = data.frame(co2.from.ch4.Mg = unlist(ch4[2,]), # 1 MG = 1 metric ton = 1000kg
+                               WB_ID = ch4[[5,1]]$WB_ID, # for merging
+                               simulation = rep(1:N, each = nrow(ch4[[5]]))) # called in co2 calcs below
+
+# co2 from ch4 for each lake and simulation in tmdl.  10000 simulations of ~4200 lakes
+co2.from.ch4.tmdl = data.frame(co2.from.ch4.Mg = unlist(ch4[3,]), # 1 MG = 1 metric ton = 1000kg
+                               WB_ID = ch4[[6,1]]$WB_ID, # for merging
+                               simulation = rep(1:N, each = nrow(ch4[[6]]))) # called in co2 calcs below
+
 emissions.by.type.ch4 = ch4[4, N] ## keep just the final mean... clearly a cleaner way but this works
 
-## extract lake specific results
-plan(multisession)
-tic() # 20 elements: 1.9 sec map, 10.87 sec future_map, weird
-poo <- list(ch4[6,], # tmdl scenario.  
+
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+ch4.by.lake <- list(ch4[6,], # tmdl scenario.  
             ch4[5,])  %>% # 2010 scenario
   flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
   #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
-  purrr::map(., function(.x) { # furrr::future_map
+  purrr::map(., function(.x) {
     .x %>% 
       dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
       # create new column specifying scenario.
@@ -1058,12 +1089,13 @@ poo <- list(ch4[6,], # tmdl scenario.
        # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
       mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
   }) %>%
-  # collapse into single data frame.  data.table implentation of rbind is fast
+  # collapse into single data frame.  data.table implementation of rbind is fast
   data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
   group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
   summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
   ungroup() %>%
-  pivot_wider(names_from = scenario, values_from = contains("preds")) # cast to wide
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_ch4"), contains("preds"))
 toc() 
 
 ## check values
@@ -1071,11 +1103,14 @@ summary(diff_ch4)
 summary(co2.from.ch4.2010)
 summary(co2.from.ch4.tmdl)
 emissions.by.type.ch4
+head(ch4.by.lake)
 
 ## clean house
-rm(ch4)
-gc()
-
+#rm(ch4)
+#gc()
+```
+#### CO2
+```{r results='hide', message=FALSE, warning=FALSE}
 #####################################
 ################################  CO2
 #####################################
@@ -1113,20 +1148,22 @@ emissions.by.type.co2 = tibble()
 
 ## empty object to collect results
 diff_co2 <- NULL 
+co2 <- list() # for list of lake-specific co2 emission rates
 
 ## number of simulations
 N = 1e4
 #N = 10
+tic() # 2 hours
 ## using for loop because i need to reference index i.
 for (i in 1:N) {
   
   ## print where you are in the loop
-  # print(i)
+  print(i)
   
   ## distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
   
-  ## predictions based on model uncertainty
+  ## predictions based on model uncertainty.  log10(CO2-C + offset) [mg co2-c m-2 d-1]
   preds_2010_lakes <- cbind(lakes,
                             dat_2010 %*% coefs)
   preds_tmdl_lakes <- cbind(lakes,
@@ -1135,8 +1172,9 @@ for (i in 1:N) {
   ##  Winter rate
   # Data are mixed for CO2.  Jones et al 2016 report uptake during summer and outgassing
   # during winter for midwestern lakes.  Knoll et al reports sustained outgassing for an Ohio
-  # Lake.  I think it best to assume 1) emissions during ice-cover are 0, and 2) emissions are 
-  # equal to model predictions during the rest of the year.  
+  # Lake.  I think it best to assume that production rates are equal to predicted emissions
+  # rates throughout the year.  CO2 produced during periods of ice cover will be emitted to 
+  # atmosphere during ice out.
   
   #################################
   #################################
@@ -1146,14 +1184,14 @@ for (i in 1:N) {
   preds_tmdl_lakes %<>% 
     mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
   
-  # CO2 produced during open-water periods
+  # scale to entire year.  Assume rates apply to warm, cold, and ice cover days.
   preds_2010_lakes %<>% 
-    mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
+    mutate(preds_2010_lakes = (preds_2010_lakes * (365)) * # apply to 365 days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
   
   preds_tmdl_lakes %<>% 
-    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365)) * # apply to 365 days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
   
   ## store emissions by type
   emissions.by.type.co2 =
@@ -1177,25 +1215,71 @@ for (i in 1:N) {
               .groups = 'drop') %>% 
     ungroup 
   
-  # Add CO2 produced from methanotrophy
-  # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  ## Add CO2 produced from methanotrophy
+  # 2010 first
+  co2.from.ch4.2010.i <- co2.from.ch4.2010 %>%
+    filter(simulation == i) %>%
+    dplyr::select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
+  
   preds_2010_lakes %<>% 
-    summarize(preds_2010_lakes = sum(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T)) %>%
-    mutate(preds_2010_lakes = preds_2010_lakes + co2.from.ch4.2010[i]) 
+    mutate(preds_2010_lakes = 
+             (preds_2010_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
+             co2.from.ch4.2010.i)
+  
+  # tmdl next
+  co2.from.ch4.tmdl.i <- co2.from.ch4.tmdl %>%
+    filter(simulation == i) %>%
+    select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
   
   preds_tmdl_lakes %<>%
-    summarize(preds_tmdl_lakes = sum(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T)) %>%
-    mutate(preds_tmdl_lakes = preds_tmdl_lakes + co2.from.ch4.tmdl[i])
+    mutate(preds_tmdl_lakes = 
+             (preds_tmdl_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
+             co2.from.ch4.tmdl.i) # co2 from ch4 for all lakes/simulations
+  
+  co2[[i]] <- list(preds_2010_lakes, preds_tmdl_lakes)
   
   ## convert and take difference in predictions and sum across all lakes
   diff_co2[i] <- sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T)
   
 }
+toc()
 
 ## inspect results
 summary(diff_co2)
 emissions.by.type.co2
 
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+co2.by.lake <- co2 %>% # list of 10,000 elements.  each element is a list of 2 (tmdl and 2010)
+  flatten() %>% # Flatten creates a list of 20,000 elements
+  #.[1:2] %>% # first tmdl and 2010 for development
+  purrr::map(., function(.x) {
+    .x %>% 
+      dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
+      # create new column specifying scenario.
+      mutate(scenario = case_when(any(str_detect(names(.), "tmdl")) ~ "tmdl",
+                                  any(str_detect(names(.), "2010")) ~ "2010",
+                                  TRUE ~ "FLY YOU FOOLS!")) %>%
+      # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
+      set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
+       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
+  }) %>%
+  # collapse into single data frame.  data.table implementation of rbind is fast
+  data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
+  group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
+  summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
+  ungroup() %>%
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_co2"), contains("preds"))
+toc()
+
+```
+
+#### N2O
+```{r results='hide', message=FALSE, warning=FALSE}
 #####################################
 ################################  N20
 #####################################
@@ -1230,7 +1314,9 @@ N = 1e4
 #N=10
 
 ## simulation
-n2o <- pbreplicate(N, {
+plan("multisession") # turn on parallel processing
+tic() # 1 minute
+n2o <- future_replicate(N, {
   
   ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.n2o), Sigma = vcov(mod.n2o))
@@ -1244,21 +1330,22 @@ n2o <- pbreplicate(N, {
   # Winter rates
   # Few annual data available for N2O.  Kortelainen et al. 2020 reported peak N2O during winter in Finnish lakes,
   # but Beaulieu et al. 2010 reported peak N2O during summer in the Ohio River and negligable N2O during the
-  # winter.  I think it best to assume 1) emissions during ice-cover are 0, and 2) emissions are 
-  # equal to model predictions during the rest of the year.  
+  # winter.  I think it best to assume that production rates are equal to predicted emissions
+  # rates throughout the year.  N2O produced during periods of ice cover will be emitted to 
+  # atmosphere during ice out.  
   
   preds_2010_lakes %<>% 
     mutate(preds_2010_lakes = pN2o(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg N2O m-2 day-1
   preds_tmdl_lakes %<>% 
     mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg N2O m-2 day-1
   
-  # open water rates: mg N2O d-1
+  # open water rates: mg N2O y-1
   preds_2010_lakes %<>% 
-    mutate(preds_2010_lakes = (preds_2010_lakes * (365-day_of_ice_filled)) * # apply to open-water days 
-             1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+    mutate(preds_2010_lakes = (preds_2010_lakes * 365) * # scale to year 
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O y-1
   preds_tmdl_lakes %<>% 
-    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365-day_of_ice_filled)) * # apply to open-water days
-             1e6 * AREASQKM, na.rm=TRUE) # 1000000m2 = 1km2.  new variable in mg N2O d-1
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * 365) * # scale to year
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O y-1
   
   # unit conversion
   preds_2010_lakes %<>% 
@@ -1290,20 +1377,64 @@ n2o <- pbreplicate(N, {
   
   ## Convert and take difference in predictions and sum across all lakes
   list(
+    # row 1: incremental N2O
     sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T),
-    emissions.by.type.n2o
+    
+    # row 2:  n2o by IPCC category for MRB extrapolation
+    emissions.by.type.n2o,
+    
+    # row 3: lake specific results for 2010 scenario
+    preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
+    
+    # row 4:  lake specific results for tmdl scenario
+    preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes)
   )
 })
+toc()
+plan("sequential") # turn off parallel processing
 
 diff_n2o = unlist(n2o[1,])
 emissions.by.type.n2o = n2o[2, N]
 
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+n2o.by.lake <- list(n2o[3,], # 2010 scenario.  
+            n2o[4,])  %>% # 2010 scenario
+  flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
+  #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
+  purrr::map(., function(.x) {
+    .x %>% 
+      dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
+      # create new column specifying scenario.
+      mutate(scenario = case_when(any(str_detect(names(.), "tmdl")) ~ "tmdl",
+                                  any(str_detect(names(.), "2010")) ~ "2010",
+                                  TRUE ~ "FLY YOU FOOLS!")) %>%
+      # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
+      set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
+       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
+  }) %>%
+  # collapse into single data frame.  data.table implementation of rbind is fast
+  data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
+  group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
+  summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
+  ungroup() %>%
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_n2o"), contains("preds"))
+toc()
+
+
+
+
 ## check values
 summary(diff_n2o)
 emissions.by.type.n2o
-
+head(n2o.by.lake)
 ```
 
+#### Incremental change table + export for MRB extrapolation
 ```{r}
 
 ## export emissions by climate zone and type
