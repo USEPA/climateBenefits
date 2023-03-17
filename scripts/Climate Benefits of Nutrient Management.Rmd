@@ -2048,6 +2048,24 @@ dat.yr.sf %>% filter(ALAND == 2305001140)
 
 ```
 
+## Plots of nutrient and emission reductions by latitude
+```{r eval = FALSE}
+
+# reduction in areal CH4 emission rate vs latitude
+dat.lat <- dat.pt %>%
+  filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
+  mutate(lat = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  dplyr::select(lat, ChlaDiff, pDiff, contains("diff_g")) %>%
+  pivot_longer(cols = !lat)
+
+ggplot(dat.lat, aes(lat, value)) +
+  geom_point() +
+  facet_wrap(~name, scales = "free")
+
+
+```
+
 
 ## CDF plots
 ```{r eval = FALSE}
@@ -2064,7 +2082,7 @@ dat.long <- dat.pt %>% st_drop_geometry() %>%
                               TRUE ~ "WazUp!"))
 
 # Two panel plot of P and Chl for manuscript-------------------------
-p1 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)), 
+chl.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)), 
              aes(value, linetype = scenario)) +
   stat_ecdf(geom="step", pad = FALSE) +
   xlim(0, 0.125) + # otherwise extreme values obscure patterns
@@ -2075,10 +2093,11 @@ p1 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)),
   theme(legend.position = c(0.8, 0.4),
         legend.title = element_blank())
 
-p2 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)), 
+tp.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)), 
              aes(value, linetype = scenario)) +
   stat_ecdf(geom="step", pad = FALSE) +
   xlim(0, 0.25) +
+  ylab("Proportion of Lakes") +
   xlab("Total phosphorus (mg/L)") +
   annotate("text", x = 0, y = 1, label = "B") +
   #ggtitle("total phosphorus") +
@@ -2086,7 +2105,7 @@ p2 <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)),
   theme(axis.title.y = element_blank(),
         legend.position = "none")
 
-g <- gridExtra::grid.arrange(p1, p2, ncol = 2, nrow = 1)
+g <- gridExtra::grid.arrange(chl.ecdf, tp.ecdf, ncol = 2, nrow = 1)
 
 ggsave(file = "output/figures/tp.chl.cdf.tiff", g, width = 7.5, height = 3.5, units = "in")
 
@@ -2535,6 +2554,253 @@ p.tp <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name), value <
 
 cowplot::plot_grid(p.chl, p.tp, ncol = 1, nrow = 2, align = "hv")
 ggsave(file = "output/figures/NElakesOutputCDF.tiff", width = 4, height = 5.5, units = "in")
+
+```
+
+# Stitch together manuscript figures
+  
+## Figure 3: CDF and spatial of TP and Chla
+```{r}
+#Figure 3
+# 4 panel plot of chl cdf, chl diff spatial plot, tp cdf, tp diff spatial
+
+# chl figure
+# better without extreme values.  Remove single lake with really large chla value
+# (>200ug/L) and  greater chla after TMDL implementation
+filter(dat.pt, Chla2010 > 0.2 & ChlaDiff < 0) # one lake
+
+p1 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(ChlaDiff), 
+          aes(color = ChlaDiff * 1000)) + # *1000 for mg -> ug
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "B") +
+  labs(color = "Chl a\nreduction (ug/L)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        axis.title = element_blank())
+
+# chl.ecdf as above
+chl.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)), 
+             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+  stat_ecdf(geom="step", pad = FALSE) +
+  xlim(0, 125) + # otherwise extreme values obscure patterns
+  ylab("Proportion of Lakes") +
+  xlab("chlorophyll a (ug/L)") +
+  annotate("text", x = 0, y = 1, label = "A") +
+  theme_bw() +
+  theme(legend.position = c(0.8, 0.4),
+        legend.title = element_blank())
+
+# TP figure
+p2 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(pDiff), 
+          aes(color = pDiff * 1000)) + # *1000 for mg -> ug
+  geom_sf(data = cbb, fill = "white", size = 0.1) + #size = NA
+  annotate("text", x = -80, y = 43, label = "D") +
+  labs(color = "TP\nreduction (ug/L)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        axis.title = element_blank())
+
+
+
+tp.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)), 
+             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+  stat_ecdf(geom="step", pad = FALSE) +
+  xlim(0, 250) +
+  ylab("Proportion of Lakes") +
+  xlab("Total phosphorus (ug/L)") +
+  annotate("text", x = 0, y = 1, label = "C") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+g <- gridExtra::grid.arrange(chl.ecdf, p1, tp.ecdf, p2, ncol = 2, nrow = 2)
+
+ggsave(file = "output/figures/Fig.3.tiff", g, width = 7.5, height = 6.0, units = "in")
+
+
+
+
+
+
+```
+
+
+## Figure 4: areal N2O, CH4, CO2 reductions spatial
+```{r}
+# CH4 figure
+p4 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(ch4diff_g_m2_y), 
+          aes(color = ch4diff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "A") +
+  labs(color = expression(atop(CH[4]~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(), # plot space background
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") + 
+  scale_color_gradientn(colors = rainbow(5))
+
+
+# CO2 figure
+p5 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(co2diff_g_m2_y), 
+          aes(color = co2diff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "B") +
+  labs(color = expression(atop(CO[2]~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") +
+  scale_color_gradientn(colors = rainbow(5))
+
+
+# N2O figure
+p6 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(n2odiff_g_m2_y), # plot higher value points on top of lower
+          aes(color = n2odiff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "C") +
+  labs(color = expression(atop(N[2]*O~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") +
+  scale_color_gradientn(colors = rainbow(5), breaks = c(0.01, 0.05, 0.1))
+
+
+cowplot::plot_grid(p4, p5, p6, ncol = 3, nrow = 1, align = "hv")
+
+ggsave(file = "output/figures/figure4.tiff", width = 7, height = 5, units = "in")
+
+```
+
+  
+  
+## Supplemental Figure 1
+```{r}
+# reduction in areal CH4 emission rate vs latitude
+dat.lat <- dat.pt %>%
+  filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
+  mutate(lat = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  dplyr::select(lat, ChlaDiff, pDiff, contains("diff_g")) %>%
+  mutate(ChlaDiff = ChlaDiff *1000, # mg/l --> ug/L
+         pDiff = pDiff * 1000) %>% # mg/l --> ug/L
+  pivot_longer(cols = !lat) %>%
+  # this trick below controls placement of facets
+  mutate(name = factor(name, levels = c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y","pDiff", "ChlaDiff")))
+ 
+# custom labels for facets.  This is a DF containing a custom label for each row in data.lat
+facet.labs <- dat.lat %>% select(name) %>%
+  mutate(name = case_when(name == "ch4diff_g_m2_y" ~ "CH[4]", # note subscript picked up below
+                           name == "ChlaDiff" ~ "chlorophyll~a",
+                           name == "co2diff_g_m2_y" ~ "CO[2]",
+                           name == "n2odiff_g_m2_y" ~ "N[2]*O",
+                           name == "pDiff" ~ "total~phosphorus"))
+facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
+
+ggplot(dat.lat, aes(lat, value)) +
+  geom_point() +
+  facet_wrap(~name, scales = "free", 
+             labeller = as_labeller(facet.labs, # custom labels
+                                    default = label_parsed)) + # this applies formatting
+  xlab("latitude") +
+  ylab("Baseline - TMDL")
+
+
+ggsave(file = "output/figures/supplementalFigure1.tiff", width = 7, height = 5, units = "in")
+```
+ 
+ 
+## Supplemental Figure 2
+```{r}
+ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + 
+  geom_point(size = 0.5) + 
+  scale_x_log10() +
+  ylab(expression(atop(CO[2]~emission~rate, Baseline~-~TMDL~(g~m^{-2}~y^{-1})))) +
+  xlab(expression(waterbody~surface~area~(km^{2}))) +
+  theme(axis.title = element_text(size = 10))
+
+ggsave(file = "output/figures/supplementalFigure2.tiff", width = 3, height = 3, units = "in")
+```
+
+
+# Manuscript Stats
+```{r}
+# how many sites with increased TP and chla under TMDL
+dat.pt %>% # 78 sites out of 4221 = 1.8%
+  st_drop_geometry() %>% 
+  as_tibble() %>%
+  filter(pDiff < 0 | ChlaDiff < 0) %>%
+  summarize(n = nrow(.))
+
+
+# TP and Chla:  average reduction across all sites
+map(dat.pt %>% select(pDiff, ChlaDiff) %>% mutate(across(everything(), ~ .x * 1000)), summary)
+
+
+# CH4: average change across sites
+map(dat.pt %>% select(ch4diff_g_m2_y, preds_lakes_g_m2_y_2010_ch4), summary) # 6.65
+dat.pt %>% mutate(ch4diff_perc = (ch4diff_g_m2_y / preds_lakes_g_m2_y_2010_ch4) * 100) %>%
+  {summary(.$ch4diff_perc)}
+
+# CO2: average change across sites
+map(dat.pt %>% select(co2diff_g_m2_y, preds_lakes_g_m2_y_2010_co2), summary) # 42
+
+dat.pt %>% filter(AREASQKM > 12) %>% 
+  select(AREASQKM, co2diff_g_m2_y, pDiff, ChlaDiff) %>% 
+  arrange(AREASQKM) # 4 large lakes w/<co2Diff
+
+dat.pt %>% filter(AREASQKM > 12) %>% 
+  select(AREASQKM, co2diff_g_m2_y, pDiff, ChlaDiff) %>% 
+ summarize(meanCo2Large = mean(co2diff_g_m2_y)) # 4 large lakes w/<co2Diff
+
+dat.pt %>% mutate(size = case_when(AREASQKM > 12 ~ "big", TRUE ~ "small")) %>%
+  {table(.$size)} # only 4 big lakes
+
+ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + geom_point()
+
+dat.pt %>% mutate(co2diff_perc = (co2diff_g_m2_y / preds_lakes_g_m2_y_2010_co2) * 100) %>%
+  {summary(.$co2diff_perc)} #4.9%
+
+# N2O: average change across sites
+map(dat.pt %>% select(n2odiff_g_m2_y, preds_lakes_g_m2_y_2010_n2o), summary) # 0.01
+dat.pt %>% mutate(n2odiff_perc = (n2odiff_g_m2_y / preds_lakes_g_m2_y_2010_n2o) * 100) %>%
+  {summary(.$n2odiff_perc)}
 
 ```
 
