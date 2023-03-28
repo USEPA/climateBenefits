@@ -2181,12 +2181,13 @@ dplyr::filter(dat.pt, ch4diff_g_m2_y <0) %>%
 # TOTAL REDUCTION-----
 # histogram
 # CH4
-#(ch42010.lk.yr - ch4TMDLnew.lk.yr)/ch42010.lk.yr > -1)
 p.ch4 <- ggplot(dat.pt, aes(x = ch4diffMg))  + 
   geom_histogram(bins = 75) +
-  scale_x_continuous(trans = ggallin::pseudolog10_trans, breaks = c(-10, -3, 0, 3, 10, 30, 100), minor_breaks = NULL) +
+  scale_x_continuous(trans = ggallin::pseudolog10_trans, 
+                     breaks = c(-10, -3, 0, 3, 10, 30, 100), 
+                     minor_breaks = NULL) +
   geom_rug(length = grid::unit(3, units = "mm")) +
-  xlab(expression(atop("Emission Reduction", ~(metric~tons~CH[4]~yr^{-1}~lake^{-1})))) +
+  xlab(expression(atop("Emission Change", ~(metric~tons~CH[4]~yr^{-1}~lake^{-1})))) +
   theme_bw() +
   theme(axis.title.y = element_blank(),
         axis.text = element_text(size = 15),
@@ -2196,9 +2197,10 @@ p.ch4 <- ggplot(dat.pt, aes(x = ch4diffMg))  +
 # N2O
 p.n2o <- ggplot(dat.pt, aes(x = n2odiffKg)) + 
   geom_histogram(bins = 75) +
-  scale_x_continuous(trans = ggallin::pseudolog10_trans, breaks = c(-10, -3, 0, 3, 10, 30, 100)) +
+  scale_x_continuous(trans = ggallin::pseudolog10_trans, 
+                     breaks = c(-10, -3, 0, 3, 10, 30, 100)) +
   geom_rug(length = grid::unit(3, units = "mm")) +
-  xlab(expression(atop("Emission Reduction", ~(kg~N[2]*O~yr^{-1}~lake^{-1})))) +
+  xlab(expression(atop("Emission Change", ~(kg~N[2]*O~yr^{-1}~lake^{-1})))) +
   theme_bw() +
   theme(axis.title.y = element_blank(),
         axis.text = element_text(size = 15),
@@ -2210,7 +2212,7 @@ p.co2 <- ggplot(dat.pt, aes(x = co2diffMg)) +
   scale_x_continuous(trans = ggallin::pseudolog10_trans,
                      breaks = c(-10, -3, 0, 3, 10, 30, 100)) +
   geom_rug(length = grid::unit(3, units = "mm")) +
-  xlab(expression(atop("Emission Reduction", ~(metric~tons~CO[2]~yr^{-1}~lake^{-1})))) +
+  xlab(expression(atop("Emission Change", ~(metric~tons~CO[2]~yr^{-1}~lake^{-1})))) +
   theme_bw() +
   theme(axis.title.y = element_blank(),
         axis.text = element_text(size = 15),
@@ -2233,13 +2235,10 @@ dat.pt %>%
 ```{r eval = FALSE}
 
 # scatterplot vs size, 3 gases----------------
-dat.yr.sf.all %>%
+dat.pt %>%
   st_drop_geometry() %>%
-  mutate(p.ch4 = (ch42010.lk.yr - ch4TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         p.n2o = (n2o2010.lk.yr - n2oTMDLnew.lk.yr) / (1e3*1e3),
-         p.co2 = (co22010.lk.yr - co2TMDLnew.lk.yr) / (1e3*1e3*1e3)) %>%
-  dplyr::select(p.ch4, p.n2o, p.co2, AREASQKM) %>%
-  pivot_longer(cols = starts_with("p.")) %>%
+  dplyr::select(co2diffMg, ch4diffMg, n2odiffKg, AREASQKM) %>%
+  pivot_longer(cols = !AREASQKM) %>%
   ggplot(., aes(AREASQKM, value, color = name)) +
   scale_color_discrete(labels = c(expression(CH[4]),
                                   expression(CO[2]),
@@ -2258,13 +2257,9 @@ ggsave(file = "output/figures/incremental.lake.area.tiff", width = 6, height = 5
 
 
 # scatterplot vs size, CH4 only----------------
-dat.yr.sf.all %>%
+dat.pt %>%
   st_drop_geometry() %>%
-  mutate(p.ch4 = (ch42010.lk.yr - ch4TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         p.n2o = (n2o2010.lk.yr - n2oTMDLnew.lk.yr) / (1e3*1e3),
-         p.co2 = (co22010.lk.yr - co2TMDLnew.lk.yr) / (1e3*1e3*1e3)) %>%
-  dplyr::select(p.ch4, AREASQKM) %>%
-  ggplot(., aes(AREASQKM, p.ch4)) +
+  ggplot(., aes(AREASQKM, ch4diffMg)) +
   geom_point(alpha = 0.5) +
   scale_x_continuous(trans = ggallin::pseudolog10_trans, breaks = c(0,1,2.5,5,10,20,30)) +
   scale_y_continuous(trans = ggallin::pseudolog10_trans, breaks = c(-100,-50, -25,-10, -1, 0, 1, 10, 25, 50, 100, 150)) +
@@ -2277,12 +2272,9 @@ ggsave(file = "output/figures/incremental.ch4.lake.area.tiff", width = 6, height
 
 # Avoided GHG emissions by lake surface area bar plot----------
 # set up data
-dat.bin <- dat.yr.sf.all %>%
+dat.bin <- dat.pt %>%
   st_drop_geometry() %>%
-  mutate(p.ch4 = (ch42010.lk.yr - ch4TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         p.n2o = (n2o2010.lk.yr - n2oTMDLnew.lk.yr) / (1e3*1e3*1e3),
-         p.co2 = (co22010.lk.yr - co2TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         lake.bins = ifelse(AREASQKM <= 0.01,
+  mutate(lake.bins = ifelse(AREASQKM <= 0.01,
                             "< 0.01 km2",
                             ifelse(AREASQKM > 0.01 & AREASQKM <= 0.1,
                                    ">0.01 km2 & < 0.1 km2",
@@ -2297,16 +2289,16 @@ dat.bin <- dat.yr.sf.all %>%
                                                   ">0.1 km2 & < 1 km2", ">1 km2 & < 10 km2",
                                                   "> 10 km2"))) %>%
 
-  dplyr::select(p.ch4, p.n2o, p.co2, lake.bins) %>%
-  pivot_longer(cols = starts_with("p.")) %>%
+ dplyr::select(co2diffMg, ch4diffMg, n2odiffKg, lake.bins, AREASQKM) %>%
+  pivot_longer(cols = -c(lake.bins, AREASQKM)) %>%
   group_by(name, lake.bins) %>% # operate by gas x lake.bin
   summarize(total = sum(value), # total avoided
-            obs = paste0("n = ", length(value))) #lakes per group
+            obs = paste0("n = ", length(value), ", area = ", round(sum(AREASQKM), 0), " km2")) #lakes per group
 
 # create labels for facets
-name.labs <- as_labeller(c(p.ch4 = "CH[4]",
-                           p.co2 = "CO[2]",
-                           p.n2o = "N[2]*O"),
+name.labs <- as_labeller(c("ch4diffMg" = "CH[4]",
+                           "co2diffMg" = "CO[2]",
+                           "n2odiffKg" = "N[2]*O"),
                          default = label_parsed)
 
 
@@ -2325,32 +2317,36 @@ ggsave(file = "output/figures/incremental.by.lake.area.tiff", width = 10, height
 
 
 # lake size histogram
-ggplot(dat.yr.sf.all, aes(x=AREASQKM)) + geom_histogram(bins = 75) + scale_x_log10()
+ggplot(dat.pt, aes(x=AREASQKM)) + geom_histogram(bins = 75) + scale_x_log10()
 
 
 # Avoided emissions by ice cover and nutrients-----------------------
-dat.yr.sf.all <- dat.yr.sf.all %>%
-  mutate(ch4diff.MT = (ch42010.lk.yr - ch4TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         n2odiff.Kg = (n2o2010.lk.yr - n2oTMDLnew.lk.yr) / (1e3*1e3),
-         co2diff.MT = (co22010.lk.yr - co2TMDLnew.lk.yr) / (1e3*1e3*1e3),
-         day_of_ice_filled_bin = cut(x = day_of_ice_filled, breaks = 4,
+dat.pt <- dat.pt %>% 
+  mutate(day_of_ice_filled_bin = cut(x = day_of_ice_filled, breaks = 4,
                                      labels = c("< 28", "28 - 55", "56 - 82", ">82")))
 
 # ice cover first
 # scatterplot, not so great
-ggplot(dat.yr.sf.all, aes(day_of_ice_filled, ch4diff.MT)) + geom_point() +
+ggplot(dat.pt, aes(day_of_ice_filled, ch4diffMg)) + geom_point() +
   scale_y_continuous(trans = ggallin::pseudolog10_trans,
                      breaks = c(-100,-50, -25,-10, -1, 0, 1, 10, 25, 50, 100, 150))
 
 # bar and whisker, not much better
-ggplot(dat.yr.sf.all, aes(day_of_ice_filled_bin, ch4diff.MT)) +
+ggplot(dat.pt, aes(day_of_ice_filled_bin, ch4diffMg)) +
   geom_boxplot() +
   scale_y_continuous(trans = ggallin::pseudolog10_trans,
                      breaks = c(-100,-50, -25,-10, -1, 0, 1, 10, 25, 50, 100, 150),
                      limits = c(-1, 150))
 
 # error bars for bar chart
+# https://www.geeksforgeeks.org/bootstrap-confidence-interval-with-r-programming/
 library(boot)
+
+# custom function for boot
+mean.fun <- function(data, idx){ # idx is boot() index
+  df <- data[idx, ] # sample data
+  mean(df$ch4diffMg) # calculate mean of sample
+}
 
 # Setting the seed for
 # reproducability of results
@@ -2358,12 +2354,12 @@ set.seed(42)
 
 # Calling the boot function with the dataset
 # our function and no. of rounds
-poo <- dat.yr.sf.all %>%
+poo <- dat.pt %>%
   st_drop_geometry() %>%
   group_by(day_of_ice_filled_bin) %>%
   group_split() %>%
   lapply(., function(x) {
-    boot.out <- boot(x, mean.fun, R = 10)
+    boot.out <- boot(x, mean.fun, R = 1000)
     foo <- boot.ci(boot.out, type = "norm")
     return(foo)
   }
@@ -2378,10 +2374,10 @@ poo <- dat.yr.sf.all %>%
   do.call("rbind", .)
 
 # bar chart, this looks ok
-dat.yr.sf.all %>%
+dat.pt %>%
   st_drop_geometry() %>%
   group_by(day_of_ice_filled_bin) %>%
-  summarize(ch4diff.MTbyIceBin = mean(ch4diff.MT, na.rm = TRUE),
+  summarize(ch4diff.MTbyIceBin = mean(ch4diffMg, na.rm = TRUE),
             nobs = n()) %>%
   cbind(., poo) %>% # bring in 95% CI
   ggplot(., aes(day_of_ice_filled_bin, ch4diff.MTbyIceBin)) +
@@ -2395,21 +2391,21 @@ ggsave("output/figures/ch4ReductionByIceCoverBin.tiff", width = 4, height = 4, u
 
 
 # more chlorophyll equates to lower reduced emissions
-ggplot(filter(dat.yr.sf.all, Chla2010 < 0.2), aes(Chla2010, ch4diff.MT)) + geom_point() +
+ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Chla2010, ch4diffMg)) + geom_point() +
   scale_y_continuous(trans = ggallin::pseudolog10_trans,
                      breaks = c(-100,-50, -25,-10, -1, 0, 1, 10, 25, 50, 100, 150))
 
-ggplot(filter(dat.yr.sf.all, Chla2010 < 0.2), aes(Pvv2010, ch4diff.MT)) + geom_point() +
+ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Pvv2010, ch4diffMg)) + geom_point() +
   scale_y_continuous(trans = ggallin::pseudolog10_trans,
                      breaks = c(-100,-50, -25,-10, -1, 0, 1, 10, 25, 50, 100, 150))
 
 
-# Emission rate reductions by nutrients
+# Areal emission rate reductions by nutrients
 # Greater reduction in emission rates (mg GHG m-2 d-1) in high chl lakes
-ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Chla2010, ch4diff)) +
+ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Chla2010, ch4diff_g_m2_y)) +
   geom_point() +
-  ylim(-10, 150) +
-  ylab(expression(atop("Reduction in areal emission rate", (mg~CH[4]~m^{-2}*~day^{-1})))) +
+  ylim(-10, 60) + # cut out a few points with large negative values
+  ylab(expression(atop("Reduction in areal emission rate", (g~CH[4]~m^{-2}*~year^{-1})))) +
   xlab(expression(Baseline~chlorophyll~a~(mu*g~L^{-1}))) +
   theme(axis.title = element_text(size = 14))
 
@@ -2418,14 +2414,16 @@ ggsave("output/figures/arealCh4ReductionByChl.tiff", width = 6, height = 5, unit
 
 
 # Reduction in emission rates (mg GHG m-2 d-1) is proportional to reduction in chl
-ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Chla2010 - ChlaTMDLnew, ch4diff)) + geom_point()
+ggplot(filter(dat.pt, Chla2010 < 0.2), aes(ChlaDiff, ch4diff_g_m2_y)) +
+  geom_point() +
+  #ylim(-10, 60) + # cut out a few points with large negative values
+  ylab(expression(atop("Change in areal emission rate", (g~CH[4]~m^{-2}*~year^{-1})))) +
+  xlab(expression("Change in chlorophyll a"~(mu*g~L^{-1}))) +
+  theme(axis.title = element_text(size = 14))
 
-# Reduction in chl is proportional to reduction to baseline chlorophyll
-ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Chla2010 - ChlaTMDLnew, Chla2010)) + geom_point()
 
 
-ggplot(filter(dat.pt, Chla2010 < 0.2), aes(Pvv2010, ch4diff)) + geom_point()
-ggplot(filter(dat.pt, Chla2010 < 0.2), aes(2010 - ChlaTMDLnew, ch4diffvv)) + geom_point()
+
 ```
 
 ## Avoided emissions expressed in GWP
@@ -2435,9 +2433,9 @@ ggplot(filter(dat.pt, Chla2010 < 0.2), aes(2010 - ChlaTMDLnew, ch4diffvv)) + geo
 
 dat.gwp <- data.frame(type = rep(c("mass", "gwp"), each = 3),
                       gas = rep(c("CH4", "CO2", "N2O"), 2), #rep(c("CH4", "CO2", "N2O"), 2)
-                      tot = c(1870, 7008, 4.7, 1870*28, 7008, 4.7*265),
-                      tot.lwr = c(1048, 5921, 2.1, 1048*28, 5921, 2.1*265),
-                      tot.upr = c(2958, 8166, 7.6, 2958*28, 8166, 7.6*265))
+                      tot = c(2039, 7871, 5.3, 2039*28, 7871, 5.3*265),
+                      tot.lwr = c(1195, 6646, 2.5, 1195*28, 6646, 2.5*265),
+                      tot.upr = c(3145, 9123, 8.6, 3145*28, 9123, 8.6*265))
 
 p.mass <- ggplot(data = filter(dat.gwp, type == "mass") , aes(x=gas, y=tot)) +
   geom_bar(stat = "identity") +
@@ -2711,7 +2709,7 @@ ggsave(file = "output/figures/figure4.tiff", width = 7, height = 5, units = "in"
   
   
 ## Supplemental Figure 1
-```{r}
+```{r supplementalFig1}
 # reduction in areal CH4 emission rate vs latitude
 dat.lat <- dat.pt %>%
   filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
@@ -2744,10 +2742,26 @@ ggplot(dat.lat, aes(lat, value)) +
 
 ggsave(file = "output/figures/supplementalFigure1.tiff", width = 7, height = 5, units = "in")
 ```
- 
- 
+
+
 ## Supplemental Figure 2
-```{r}
+```{r supplementalFig2}
+# Reduction in emission rates (mg GHG m-2 d-1) is proportional to reduction in chl
+ggplot(dat.pt, aes(ChlaDiff, ch4diff_g_m2_y)) +
+  geom_point(size = 0.5) +
+  ylim(-25, 60) + # cut out a few points with large negative values
+  xlim(-0.03, 0.075) +
+  ylab(expression(atop(CH[4]~emission~rate, Baseline~-~TMDL~(g~m^{-2}~y^{-1})))) +
+  xlab(expression(atop(chlorophyll~a, Baseline~-~TMDL~(mu*g~L^{-1})))) +
+  theme(axis.title = element_text(size = 10))
+
+ggsave("output/figures/supplementalFigure2.tiff", width = 3, height = 3, units = "in")
+
+
+```
+ 
+## Supplemental Figure 3
+```{r supplementalFig3}
 ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + 
   geom_point(size = 0.5) + 
   scale_x_log10() +
@@ -2755,8 +2769,63 @@ ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) +
   xlab(expression(waterbody~surface~area~(km^{2}))) +
   theme(axis.title = element_text(size = 10))
 
-ggsave(file = "output/figures/supplementalFigure2.tiff", width = 3, height = 3, units = "in")
+ggsave(file = "output/figures/supplementalFigure3.tiff", width = 3, height = 3, units = "in")
 ```
+
+## Supplemental Figure 4
+```{r supplementalFig4}
+
+# TOTAL REDUCTION-----
+# histogram
+# CH4
+p.ch4 <- ggplot(dat.pt, aes(x = ch4diffMg))  + 
+  geom_histogram(bins = 75) +
+  scale_x_continuous(trans = ggallin::pseudolog10_trans, 
+                     breaks = c(-10, -3, 0, 3, 10, 30, 100), 
+                     minor_breaks = NULL) +
+  geom_rug(length = grid::unit(3, units = "mm")) +
+  annotate("text", x = min(dat.pt$ch4diffMg), y = Inf, hjust = 0, vjust = 1, label = "A", size = 8) +
+  xlab(expression(atop("Emission Change", ~(metric~tons~CH[4]~yr^{-1}~lake^{-1})))) +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text = element_text(size = 15),
+        axis.title = element_text(size = 20))
+
+
+# N2O
+p.n2o <- ggplot(dat.pt, aes(x = n2odiffKg)) + 
+  geom_histogram(bins = 75) +
+  scale_x_continuous(trans = ggallin::pseudolog10_trans, 
+                     breaks = c(-10, -3, 0, 3, 10, 30, 100)) +
+  geom_rug(length = grid::unit(3, units = "mm")) +
+  annotate("text", x = min(dat.pt$n2odiffKg), y = Inf, hjust = 0, vjust = 1, label = "B", size = 8) +
+  xlab(expression(atop("Emission Change", ~(kg~N[2]*O~yr^{-1}~lake^{-1})))) +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text = element_text(size = 15),
+        axis.title = element_text(size = 20))
+
+# CO2
+p.co2 <- ggplot(dat.pt, aes(x = co2diffMg)) + 
+  geom_histogram(bins = 75) +
+  scale_x_continuous(trans = ggallin::pseudolog10_trans,
+                     breaks = c(-10, -3, 0, 3, 10, 30, 100)) +
+  geom_rug(length = grid::unit(3, units = "mm")) +
+  annotate("text", x = min(dat.pt$co2diffMg), Inf, hjust = 0, vjust = 1, label = "C", size=8) +
+  xlab(expression(atop("Emission Change", ~(metric~tons~CO[2]~yr^{-1}~lake^{-1})))) +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text = element_text(size = 15),
+        axis.title = element_text(size = 20))
+
+
+g <- gridExtra::grid.arrange(p.ch4, p.co2, p.n2o, ncol = 3, nrow = 1)
+
+ggsave(file = "output/figures/supplemental.fig4.tiff", g, width = 15, height = 6, units = "in")
+
+
+```
+
 
 
 # Manuscript Stats
