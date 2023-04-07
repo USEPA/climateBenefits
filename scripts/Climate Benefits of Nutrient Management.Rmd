@@ -2316,10 +2316,6 @@ ggsave(file = "output/figures/incremental.by.lake.area.tiff", width = 10, height
 
 
 
-# lake size histogram
-ggplot(dat.pt, aes(x=AREASQKM)) + geom_histogram(bins = 75) + scale_x_log10()
-
-
 # Avoided emissions by ice cover and nutrients-----------------------
 dat.pt <- dat.pt %>% 
   mutate(day_of_ice_filled_bin = cut(x = day_of_ice_filled, breaks = 4,
@@ -2425,6 +2421,21 @@ ggplot(filter(dat.pt, Chla2010 < 0.2), aes(ChlaDiff, ch4diff_g_m2_y)) +
 
 
 ```
+## Lake size distribution
+```{r}
+# lake size histogram
+ggplot(dat.pt, aes(x=AREASQKM)) + 
+  geom_histogram(bins = 75) + 
+  scale_x_log10() +
+  xlab(expression(Waterbody~surface~area~(km^{2})))
+
+
+# lake size CDF
+ggplot(dat.pt, aes(x=AREASQKM)) +
+   stat_ecdf(geom="step", pad = FALSE)
+
+```
+
 
 ## Avoided emissions expressed in GWP
 ```{r eval = FALSE}
@@ -2774,6 +2785,20 @@ ggsave(file = "output/figures/supplementalFigure3.tiff", width = 3, height = 3, 
 
 ## Supplemental Figure 4
 ```{r supplementalFig4}
+# See 'Lake size distribution' section
+# lake size histogram
+ggplot(dat.pt, aes(x=AREASQKM)) + 
+  geom_histogram(bins = 75) + 
+  scale_x_log10() +
+  xlab(expression(Waterbody~surface~area~(km^{2}))) +
+   theme(axis.title = element_text(size = 10))
+
+ggsave("output/figures/supplementalFigure4.tiff", width = 3, height = 3, units = "in")
+
+```
+
+## Supplemental Figure 5
+```{r supplementalFig5}
 
 # TOTAL REDUCTION-----
 # histogram
@@ -2821,7 +2846,7 @@ p.co2 <- ggplot(dat.pt, aes(x = co2diffMg)) +
 
 g <- gridExtra::grid.arrange(p.ch4, p.co2, p.n2o, ncol = 3, nrow = 1)
 
-ggsave(file = "output/figures/supplemental.fig4.tiff", g, width = 15, height = 6, units = "in")
+ggsave(file = "output/figures/supplemental.fig5.tiff", g, width = 15, height = 6, units = "in")
 
 
 ```
@@ -2829,6 +2854,7 @@ ggsave(file = "output/figures/supplemental.fig4.tiff", g, width = 15, height = 6
 
 
 # Manuscript Stats
+## Policy effect on nutrients, chlorophyll, and area GHG emission rates  
 ```{r}
 # how many sites with increased TP and chla under TMDL
 dat.pt %>% # 78 sites out of 4221 = 1.8%
@@ -2870,6 +2896,73 @@ dat.pt %>% mutate(co2diff_perc = (co2diff_g_m2_y / preds_lakes_g_m2_y_2010_co2) 
 map(dat.pt %>% select(n2odiff_g_m2_y, preds_lakes_g_m2_y_2010_n2o), summary) # 0.01
 dat.pt %>% mutate(n2odiff_perc = (n2odiff_g_m2_y / preds_lakes_g_m2_y_2010_n2o) * 100) %>%
   {summary(.$n2odiff_perc)}
+
+
+
+```
+
+
+## Policy effect on GHG emissions
+```{r}
+
+# total GHG reductions
+kr_simulations %>%
+  kbl(col.names = rep(c("mean", "upper 95", "lower 5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from simulation (Krinsky and Robb, 1986)") %>%
+  add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+
+
+
+
+# this give lake size at specified probability
+quantile(dat.pt$AREASQKM, probs = 0.987) # 98.7% are <= 0.95796 km2
+
+# total lake surface area
+sum(dat.pt$AREASQKM) #491.626 km2
+
+# proportion of SA attributable to lakes < 1km2.  43%!!!
+dat.pt[dat.pt$AREASQKM <= 1, "AREASQKM"] %>% 
+  st_drop_geometry() %>%
+  sum() / #280.85
+  sum(dat.pt$AREASQKM) #491.626 km2
+
+
+
+# how many greater than 1km2
+dat.pt[dat.pt$AREASQKM >= 1, "AREASQKM"] %>% nrow() #54
+
+dat.pt %>% filter(AREASQKM >10) %>% summarize(n=n())
+
+
+# total reduction by lake size
+dat.cum.emissions <- dat.pt %>%
+  st_drop_geometry() %>%
+  arrange(AREASQKM) %>%
+  select(AREASQKM, ch4diffMg, co2diffMg, n2odiffKg) %>%
+  mutate(across(contains("diff"), cumsum)) %>%
+  pivot_longer(!AREASQKM, values_to = "emission") %>%
+  group_by(name) %>%
+  mutate(ninety = 0.9*max(emission),
+         max = max(emission))
+
+# total reduction for <=1km2
+dat.cum.emissions %>%
+  slice(which.min(abs(AREASQKM - 1))) %>%
+  mutate(prop.less.1 = emission / max)
+
+index.ninety <- dat.cum.emissions %>%
+  summarize(index = which.min(abs(emission - unique(ninety))))
+
+ninety <- dat.cum.emissions %>%
+  group_by(name) %>%
+  slice(index.ninety$index)
+  
+
+dat.cum.emissions %>%
+  ggplot(aes(AREASQKM, emission, color = name)) + 
+  geom_point() + geom_line() +
+  scale_x_log10()
 
 ```
 
