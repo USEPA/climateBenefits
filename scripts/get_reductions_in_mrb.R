@@ -20,7 +20,7 @@ lapply(list.of.packages, library, character.only = TRUE)
 
 ## function to read all files in a directory
 read_mrb_waterbodies = function(x) {
-  read_parquet(x, show_col_types = F)
+  read_parquet(x)
 }
 
 ## watershed boundary
@@ -212,7 +212,6 @@ n2o.mrb %<>%
             by = c('climate.ches.bay' = 'climate'))
 
 ## get results
-## get results 
 n2o.mrb %>% 
   summarize(
     n2o.reductions = 
@@ -226,6 +225,20 @@ n2o.mrb %>%
           incr.n2o.mean.pct,                      ## this is the climate zone specific reduction from the policy (as modeled in the CB lakes model)
         na.rm = T
       )
+  ) 
+
+## get results 
+n2o.mrb %>% 
+  summarize(
+    sum(                                        ## summing across all grid cells in the mrb
+      `Nitrogen_Leach_Rate_gN/m2/yr` *          ## leach rate in grams of N per meter squared 
+        0.0075 *                                ## this converts leached N to N2O-N (IPCC rate), not entirely sure what this means but jake does because he's smart
+        ModeledPct_total_CropGrass_area/100 *   ## gives percentage of each grid cell that is responsible for leaching
+        1e4 * 1e4 *                             ## this is the area of each grid cell in meters
+        1e-6 *                                  ## grams to tonnes
+        44/14,                                  ## this converts N to N2O (or, if you're paying attention, N2O-N to N2O)
+      na.rm = T
+    )
   ) 
 
 ##########################
