@@ -1477,7 +1477,7 @@ kr_simulations %>%
   kable_classic()
 ```
 
-# Publication Figures
+# Exploratory Figures
 ## Set up temporary plotting data
 
 ```{r eval = FALSE}
@@ -2566,7 +2566,7 @@ ggsave(file = "output/figures/NElakesOutputCDF.tiff", width = 4, height = 5.5, u
 
 ```
 
-# Stitch together manuscript figures
+# Manuscript Figures
   
 ## Figure 3: CDF and spatial of TP and Chla
 ```{r}
@@ -2717,8 +2717,51 @@ ggsave(file = "output/figures/figure4.tiff", width = 7, height = 5, units = "in"
 
 ```
 
+## Figure 5: cumulative plot of total emission reductions by lake size
+```{r fig5}
+# total reduction by lake size
+dat.cum.emissions <- dat.pt %>%
+  st_drop_geometry() %>%
+  arrange(AREASQKM) %>%
+  select(AREASQKM, ch4diffMg, co2diffMg, n2odiffKg) %>%
+  mutate(across(contains("diff"), cumsum)) %>%
+  pivot_longer(!AREASQKM, values_to = "emission") %>%
+  group_by(name) %>%
+  mutate(ninety = 0.9*max(emission), # this grabs 90% of total emission reduction
+         max = max(emission))
+
+######## this chunk grabs rows corresponding to 90% of total reduction for each gas
+######## I thought about adding these via geom_vline to plot, but decided against it
+# identify row corresponding to 90% of total emission reductions
+index.ninety <- dat.cum.emissions %>%
+  summarize(index = which.min(abs(emission - unique(ninety))))
+
+ninety <- dat.cum.emissions %>% # grab the row corresponding to 90% of total reductions
+  group_by(name) %>%
+  slice(index.ninety$index)
   
-  
+###### make the figure
+dat.cum.emissions %>%
+  ggplot(aes(AREASQKM, emission, color = name)) + 
+  geom_point(size = 1) + geom_line() +
+  scale_x_log10() +
+  # change name of legend items
+  scale_color_discrete(labels = c(expression(CH[4]), expression(CO[2]), expression(N[2]*O))) +
+  ylab(expression(atop("Cumulative emission reductions",
+  paste("(mt ", CO[2], ", mt ", CH[4], ", kg ", N[2], "O)")))) +
+  xlab(expression(Waterbody ~ surface ~ area ~ (km^{2}))) +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        legend.position = "top",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 7))
+
+
+ggsave(file = "output/figures/Figure5.tiff", width = 3, height = 2.5, units = "in")
+```
+
 ## Supplemental Figure 1
 ```{r supplementalFig1}
 # reduction in areal CH4 emission rate vs latitude
@@ -2770,9 +2813,25 @@ ggsave("output/figures/supplementalFigure2.tiff", width = 3, height = 3, units =
 
 
 ```
- 
-## Supplemental Figure 3
+## Supplemental Figure 3: ice cover
 ```{r supplementalFig3}
+ ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = dat.pt, aes(color = day_of_ice_filled), size =1) +
+  geom_sf(data = cbb, fill = "white", size = NA) +
+  labs(color = expression("Ice cover \n duration (days)")) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 7),
+        axis.text = element_text(size = 7))
+
+ggsave(file = "output/figures/supplementalFigure3.tiff", width = 4, height = 3, units = "in")
+```
+
+## Supplemental Figure 4: delta CO2 vs delta chla
+```{r supplementalFig4}
+# Change in CO2 areal emission rate (g CO2 m-2 y-1) vs waterbody size
 ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + 
   geom_point(size = 0.5) + 
   scale_x_log10() +
@@ -2780,11 +2839,11 @@ ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) +
   xlab(expression(waterbody~surface~area~(km^{2}))) +
   theme(axis.title = element_text(size = 10))
 
-ggsave(file = "output/figures/supplementalFigure3.tiff", width = 3, height = 3, units = "in")
+ggsave(file = "output/figures/supplementalFigure4.tiff", width = 3, height = 3, units = "in")
 ```
 
-## Supplemental Figure 4
-```{r supplementalFig4}
+## Supplemental Figure 5: lake size histogram
+```{r supplementalFig5}
 # See 'Lake size distribution' section
 # lake size histogram
 ggplot(dat.pt, aes(x=AREASQKM)) + 
@@ -2793,12 +2852,12 @@ ggplot(dat.pt, aes(x=AREASQKM)) +
   xlab(expression(Waterbody~surface~area~(km^{2}))) +
    theme(axis.title = element_text(size = 10))
 
-ggsave("output/figures/supplementalFigure4.tiff", width = 3, height = 3, units = "in")
+ggsave("output/figures/supplementalFigure5.tiff", width = 3, height = 3, units = "in")
 
 ```
 
-## Supplemental Figure 5
-```{r supplementalFig5}
+## Optional Data Figure 1
+```{r optionalFig1}
 
 # TOTAL REDUCTION-----
 # histogram
@@ -2846,12 +2905,60 @@ p.co2 <- ggplot(dat.pt, aes(x = co2diffMg)) +
 
 g <- gridExtra::grid.arrange(p.ch4, p.co2, p.n2o, ncol = 3, nrow = 1)
 
-ggsave(file = "output/figures/supplemental.fig5.tiff", g, width = 15, height = 6, units = "in")
+ggsave(file = "output/figures/optionalFigure1.tiff", g, width = 15, height = 6, units = "in")
 
 
 ```
 
+## Optional Data Figure 2
+```{r optionalFig2}
+# see ## Avoided emissions vs environmental variables (above)
 
+
+# Avoided GHG emissions by lake surface area bar plot----------
+# set up data
+dat.bin <- dat.pt %>%
+  st_drop_geometry() %>%
+  mutate(lake.bins = ifelse(AREASQKM <= 0.01,
+                            "< 0.01 km2",
+                            ifelse(AREASQKM > 0.01 & AREASQKM <= 0.1,
+                                   ">0.01 km2 & < 0.1 km2",
+                                   ifelse(AREASQKM > 0.10 & AREASQKM <= 1,
+                                          ">0.1 km2 & < 1 km2",
+                                          ifelse(AREASQKM > 1 & AREASQKM <= 10,
+                                                 ">1 km2 & < 10 km2",
+                                                 ifelse(AREASQKM > 10,
+                                                        "> 10 km2",
+                                                        "error"))))),
+         lake.bins = factor(lake.bins, levels = c("< 0.01 km2", ">0.01 km2 & < 0.1 km2",
+                                                  ">0.1 km2 & < 1 km2", ">1 km2 & < 10 km2",
+                                                  "> 10 km2"))) %>%
+
+ dplyr::select(co2diffMg, ch4diffMg, n2odiffKg, lake.bins, AREASQKM) %>%
+  pivot_longer(cols = -c(lake.bins, AREASQKM)) %>%
+  group_by(name, lake.bins) %>% # operate by gas x lake.bin
+  summarize(total = sum(value), # total avoided
+            obs = paste0("n = ", length(value), ", area = ", round(sum(AREASQKM), 0), " km2")) #lakes per group
+
+# create labels for facets
+name.labs <- as_labeller(c("ch4diffMg" = "CH[4]",
+                           "co2diffMg" = "CO[2]",
+                           "n2odiffKg" = "N[2]*O"),
+                         default = label_parsed)
+
+
+# plot
+ggplot(dat.bin, aes(x=lake.bins, y=total)) +
+  geom_bar(position="dodge", stat="identity") +
+  facet_wrap(~name, nrow = 3, scales = "free_y", labeller = name.labs) +
+  ylab(expression(Avoided~GHG~emissions~(MT~GHG~yr^{-1}))) +
+  theme(axis.title.x = element_blank()) +
+  geom_text(aes(label = obs), vjust = -0.5, size = 3) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)))
+
+
+ggsave(file = "output/figures/optionalFigure2.tiff", width = 10, height = 5, units = "in")
+```
 
 # Manuscript Stats
 ## Policy effect on nutrients, chlorophyll, and area GHG emission rates  
@@ -2913,26 +3020,26 @@ kr_simulations %>%
   kable_classic()
 
 
-
-
 # this give lake size at specified probability
 quantile(dat.pt$AREASQKM, probs = 0.987) # 98.7% are <= 0.95796 km2
 
-# total lake surface area
-sum(dat.pt$AREASQKM) #491.626 km2
 
-# proportion of SA attributable to lakes < 1km2.  43%!!!
+# proportion of SA attributable to lakes < 1km2.  57%!!!
 dat.pt[dat.pt$AREASQKM <= 1, "AREASQKM"] %>% 
   st_drop_geometry() %>%
   sum() / #280.85
   sum(dat.pt$AREASQKM) #491.626 km2
 
-
+# proportion of SA attributable to lakes > 1km2.  43%!!!
+dat.pt[dat.pt$AREASQKM >= 1, "AREASQKM"] %>% 
+  st_drop_geometry() %>%
+  sum() / #210.78
+  sum(dat.pt$AREASQKM) #491.626 km2
 
 # how many greater than 1km2
 dat.pt[dat.pt$AREASQKM >= 1, "AREASQKM"] %>% nrow() #54
 
-dat.pt %>% filter(AREASQKM >10) %>% summarize(n=n())
+
 
 
 # total reduction by lake size
@@ -2943,26 +3050,14 @@ dat.cum.emissions <- dat.pt %>%
   mutate(across(contains("diff"), cumsum)) %>%
   pivot_longer(!AREASQKM, values_to = "emission") %>%
   group_by(name) %>%
-  mutate(ninety = 0.9*max(emission),
-         max = max(emission))
+  mutate(max = max(emission))
 
-# total reduction for <=1km2
+# total reduction for >1km2
 dat.cum.emissions %>%
   slice(which.min(abs(AREASQKM - 1))) %>%
-  mutate(prop.less.1 = emission / max)
+  mutate(prop.less.1 = 1 - (emission / max))
 
-index.ninety <- dat.cum.emissions %>%
-  summarize(index = which.min(abs(emission - unique(ninety))))
 
-ninety <- dat.cum.emissions %>%
-  group_by(name) %>%
-  slice(index.ninety$index)
-  
-
-dat.cum.emissions %>%
-  ggplot(aes(AREASQKM, emission, color = name)) + 
-  geom_point() + geom_line() +
-  scale_x_log10()
 
 ```
 
