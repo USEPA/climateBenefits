@@ -49,44 +49,44 @@ mrb.states =
 ##################### data
 ##########################
 
-## read waterbodies from ghgrp within the mississippi river basin (from get_ghg_waterbodies_in_mrb.R)
-mrb.waterbodies = 
-  list.files('output/ghg_in_mrb/', pattern = "*.parquet", full.names = T) %>%
-  map_df(~read_mrb_waterbodies(.)) %>% 
-  .$globalid
-
-## read all waterbodies from ghgrp, filter to those in mississippi river basin
-## TO-DO test if SQL query will work for this filer to speed up the read_sf, query is available as an option in read_sf: query = "SELECT * FROM national WHERE globalid in mrb.waterbodies;"
-data = 
-  read_sf('../climateBenefits.gpkg') %>%
-  dplyr::select(globalid, stusps, climate, subtype, area_ha_new, co2.tonnes.ha.y.2021, ch4.tonnes.ha.y.2021) %>% 
-  filter(globalid %in% mrb.waterbodies)
-
-## get emissions by climate zone and type from main markdown
-emissions.by.type = 
-  left_join(
-    left_join(
-      read_csv('output/emissions_by_lake_characteristics_ch4.csv', show_col_types = F),
-      read_csv('output/emissions_by_lake_characteristics_co2.csv', show_col_types = F),
-      by = c('type', 'climate.zone')
-    ),
-    read_csv('output/emissions_by_lake_characteristics_n2o.csv', show_col_types = F),
-    by = c('type', 'climate.zone')
-  ) %>% 
-  rename(subtype = type,
-         climate = climate.zone) %>% 
-  mutate(subtype = case_when(subtype == 'pond' ~ 'freshwater pond', T ~ subtype))
-
-## collect garbage
-gc()
-
-## get average emissions rates by subtype and climate to identify closest subtypes and climates
-data %>% 
-  st_drop_geometry %>% 
-  group_by(climate, subtype) %>% 
-  summarize(co2.tonnes.ha.y.2021 = mean(co2.tonnes.ha.y.2021, na.rm = T),
-            ch4.tonnes.ha.y.2021 = mean(ch4.tonnes.ha.y.2021, na.rm = T)) %>% 
-  arrange(subtype, ch4.tonnes.ha.y.2021)
+# ## read waterbodies from ghgrp within the mississippi river basin (from get_ghg_waterbodies_in_mrb.R)
+# mrb.waterbodies = 
+#   list.files('output/ghg_in_mrb/', pattern = "*.parquet", full.names = T) %>%
+#   map_df(~read_mrb_waterbodies(.)) %>% 
+#   .$globalid
+# 
+# ## read all waterbodies from ghgrp, filter to those in mississippi river basin
+# ## TO-DO test if SQL query will work for this filer to speed up the read_sf, query is available as an option in read_sf: query = "SELECT * FROM national WHERE globalid in mrb.waterbodies;"
+# data = 
+#   read_sf('../climateBenefits.gpkg') %>%
+#   dplyr::select(globalid, stusps, climate, subtype, area_ha_new, co2.tonnes.ha.y.2021, ch4.tonnes.ha.y.2021) %>% 
+#   filter(globalid %in% mrb.waterbodies)
+# 
+# ## get emissions by climate zone and type from main markdown
+# emissions.by.type = 
+#   left_join(
+#     left_join(
+#       read_csv('output/emissions_by_lake_characteristics_ch4.csv', show_col_types = F),
+#       read_csv('output/emissions_by_lake_characteristics_co2.csv', show_col_types = F),
+#       by = c('type', 'climate.zone')
+#     ),
+#     read_csv('output/emissions_by_lake_characteristics_n2o.csv', show_col_types = F),
+#     by = c('type', 'climate.zone')
+#   ) %>% 
+#   rename(subtype = type,
+#          climate = climate.zone) %>% 
+#   mutate(subtype = case_when(subtype == 'pond' ~ 'freshwater pond', T ~ subtype))
+# 
+# ## collect garbage
+# gc()
+# 
+# ## get average emissions rates by subtype and climate to identify closest subtypes and climates
+# data %>% 
+#   st_drop_geometry %>% 
+#   group_by(climate, subtype) %>% 
+#   summarize(co2.tonnes.ha.y.2021 = mean(co2.tonnes.ha.y.2021, na.rm = T),
+#             ch4.tonnes.ha.y.2021 = mean(ch4.tonnes.ha.y.2021, na.rm = T)) %>% 
+#   arrange(subtype, ch4.tonnes.ha.y.2021)
 
 # climate              subtype         co2.tonnes.ha.y.2021 ch4.tonnes.ha.y.2021
 # <chr>                <chr>                          <dbl>                <dbl>
