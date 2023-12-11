@@ -107,8 +107,6 @@ chl.p.summary %>% kbl(col.names = c("statistic", "2010 chl", "2010 TP", "2010 TN
 Each waterbody in the lake model output is uniquely identified by a 'WB_ID' value.  These values correspond to 'COMID' values in the NHDPlusV2 dataset, a spatial database of U.S. waterbodies.  Below we merge these data sets to combine the model output with other waterbody characteristics in NHDPlusV2, including waterbody surface areas.
 
 ``` {r results='hide', warning = FALSE, message = FALSE}
-# Clean this up.  This object is in .gitignore.  Reading from Bryan's repo
-# while it copies to climateBenefits_VM
 
 # 50 seconds
 nhdSf <- st_read(dsn = "store/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
@@ -2937,16 +2935,28 @@ facet.labs <- dat.lat %>% select(name) %>%
                            name == "pDiff" ~ "total~phosphorus"))
 facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
 
-ggplot(dat.lat, aes(lat, value)) +
+p1 <- ggplot(dat.lat %>% filter(name %in% c("ChlaDiff", "pDiff")), aes(lat, value)) +
   geom_point() +
   facet_wrap(~name, scales = "free", 
              labeller = as_labeller(facet.labs, # custom labels
                                     default = label_parsed)) + # this applies formatting
-  xlab("latitude") +
-  ylab("Baseline - TMDL")
+  ylab(expression(atop("Baseline - TMDL", "("*mu*"g"~L^{-1}*")"))) +
+  theme(axis.title.x = element_blank())
 
+ggsave(p1, file = "output/figures/supplementalFigure1A.tiff", width = 6.9*(2/3), height = 2.5, units = "in")
 
-ggsave(file = "output/figures/supplementalFigure1.tiff", width = 7, height = 5, units = "in")
+p2 <- ggplot(dat.lat %>% filter(name %in% c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y")), 
+             aes(lat, value)) +
+  geom_point() +
+  facet_wrap(~name, scales = "free", 
+             labeller = as_labeller(facet.labs, # custom labels
+                                    default = label_parsed)) + # this applies formatting
+  ylab(expression(atop("Baseline - TMDL", "(g"~m^{-2}~year^{-1}*")"))) +
+  xlab("latitude")
+ggsave(p2, file = "output/figures/supplementalFigure1B.tiff", width = 7, height = 2.7, units = "in")
+
+# ended up stitching together in .ppt.  Couldn't get separate y-axis labels and proper facet sizes
+# with cowplot.  
 ```
 
 
