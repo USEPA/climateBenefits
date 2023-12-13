@@ -1,0 +1,1301 @@
+---
+title: "Minimum Code to Reproduce Climate Benefits of Nutrient Management in North America’s Largest Estuary"
+author: "J. Beaulieu, E. Kopits, C. Moore, B. Parthum"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    fig_caption: yes
+    depth: 2
+    number_sections: true
+    code_folding:  hide
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup R
+```{r message=FALSE, warning=FALSE}
+# R 4.0.3
+# see renv.lock for package versions
+library(tidyverse) # dplyr, ggplot2,...
+library(readxl) # read excel file readData.R
+library(sf) # spatial data
+library(USAboundaries) # for states map in Methods section
+library(kableExtra) # nice tables
+library(magrittr)
+library(lubridate) # mdy function
+library(truncnorm)
+library(tictoc) # for timing processes
+library(future.apply) # future_replicate
+
+# 
+# 
+library(conflicted)
+conflicted::conflict_scout()
+conflict_prefer("select", "dplyr") # select() will call dplyr::select()
+conflict_prefer("filter", "dplyr") # filter() will call dplyr::filter()
+conflict_prefer("rename", "dplyr") # filter() will call dplyr::rename()
+conflict_prefer("map", "purrr")
+
+
+# This sets knitr wd to that of the Rstudio project.
+knitr::opts_knit$set(
+  # This should allow Rmarkdown to locate the data
+  root.dir = rprojroot::find_rstudio_root_file()
+)
+
+# Print R session info
+print(sessionInfo())
+```
+
+# Background
+
+Lakes and reservoirs are sources of the greenhouse gases (GHG) methane (CH~4~), carbon dioxide (CO~2~), and nitrous oxide (N~2~O).  Emission rates (mass of GHG/unit time/unit area) tend to increase with lake nutrient and chlorophyll (chl) concentrations.  Water quality regulations that limit nutrient loading to surface waters could lead to reduced lake nutrient and chl content, thereby indirectly reducing GHG emission rates.  
+
+In this project we combined modeled chl and nutrient concentrations for ~4000 lakes in the Chesepeake watershed under 1) psuedo current conditions,  and 2) a hypothetical future scenario where water quality regulations have reduced lake nutrient and chl concentration.  These estimates were combined with published models (DelSontro et al. 2018) that predict GHG emission rates from lake chl and nutrient concentration.  The objective of the project is to quantify the aggregate reduction in GHG emissions from the ~4000 lakes following the water quality improvement.  The reduction in GHG emissions is called the 'incremental' change.
+
+# Methods
+## Lake Model
+
+Retired EPA researcher Bryan Milstead used the 'Northeast Lakes' model to estimate chl for lakes within the Chesapeake Bay watershed.  Chlorophyll was modeled under the 2010 and TMDLnew scenarios as defined below:
+
+**2010** – represents an estimate of “current” load levels and uses estimated 2010 land uses, animal populations, atmospheric deposition, and point source loads (our “constant baseline” scenario for the SP study, probably a good candidate for our baseline).   
+
+**TMDLnew** - Based on the final WIPs approved by EPA and air deposition that would meet 2020 air quality standards.
+
+The modeled chl and nutrient concentrations are reported in ChesLakeLoadsConc.xlsx.
+
+```{r}
+chesDat <- read_excel("store/ChesLakeLoadsConc.xlsx",
+                      sheet = "ChesLakeConc")
+
+```
+
+The model includes `r chesDat %>% nrow()` waterbodies.  Modeled chl and TP concentrations under the 2010 scenario average `r chesDat %>% summarize(meanChl = mean(Chla2010, na.rm = TRUE)*1e3) %>% pull() %>% round(1)` ug L^-1^ and `r chesDat %>% summarize(meanTP = mean(Pvv2010, na.rm = TRUE)*1e3) %>% pull() %>% round(1)` ug L^-1^, respectively, which are reasonable environmental values.  The model predicts that lake chl and TP will be reduced by `r chesDat %>% mutate(chlReduction = ((Chla2010 - ChlaTMDLnew) / Chla2010) * 100) %>% summarize(percentRed = mean(chlReduction, na.rm = TRUE)) %>% pull() %>% round(1)`% and `r chesDat %>% mutate(tpReduction = ((Pvv2010 - PvvTMDLnew) / Pvv2010) * 100) %>% summarize(percentRed = mean(tpReduction, na.rm = TRUE)) %>% pull() %>% round(1)`%, respectively, under the TMDLnew scenario. 
+```{r }
+chl.p.summary <- do.call(cbind, lapply(chesDat %>% dplyr::select(Chla2010, Pvv2010, Nvv2010) %>% 
+                                         mutate_all(~.*1e3), summary)) %>% # *1e3 mg/L to ug/L
+  as.data.frame() %>%
+  rownames_to_column(var = 'statistic') %>% 
+  mutate_at(vars(contains("2010")), round, digits = 4)
+
+chl.p.summary %>% kbl(col.names = c("statistic", "2010 chl", "2010 TP", "2010 TN")) %>% kable_classic()
+```
+Each waterbody in the lake model output is uniquely identified by a 'WB_ID' value.  These values correspond to 'COMID' values in the NHDPlusV2 dataset, a spatial database of U.S. waterbodies.  NHDPlusV2 waterbody polygons were merged with output from the Northeast Lake model.  The NHDPlusV2 data contains  surface areas for all waterbodies in the Chesapeake Bay watershed.
+
+``` {r results='hide', warning = FALSE, message = FALSE}
+dat.sf <- st_read('store\\study_lakes\\study_lakes.shp') %>% ## read lake polys
+  # names were abbreviated with .gdb was written to .shp.  Restore names here.
+  rename(AREASQKM = AREASQK,
+         Chla2010 = Chl2010,
+         ChlaTMDLnew = ChlTMDLn,
+         PvvTMDLnew = PvvTMDLl)
+
+dat.sf <- st_read('store\\study_lakes\\study_lakes.gpkg')
+
+
+dat <- sf::st_drop_geometry(dat.sf) %>% as_tibble() # sf carries a lot of overhead not needed for most calcs.  Can convert to sf later if needed.
+```
+
+```{r fig.cap = "Location of 4,222 waterbodies in Chesapeake Bay Watershed model"}
+# read in chesapeake bay watershed boundary
+# https://data-chesbay.opendata.arcgis.com/search?categories=boundaries
+wsb <- st_read("maps/chesapeakeBayWatershed/Chesapeake_Bay_Watershed_Boundary.shp")
+
+# read in chesapeake bay boundary
+# https://data-chesbay.opendata.arcgis.com/search?categories=boundaries
+
+cbb <- st_read("maps/Chesapeake_Bay_Shoreline_Medium_Resolution.shp")
+
+# Map to make sure we are in correct region.
+states <- us_states() %>% # get states map from USAboundaries
+  filter(name %in% c("Virginia", "Maryland", "Delaware",
+                     "West Virginia", "Pennsylvania", "New York")) 
+
+# Make a quick map.
+# This seems about right.
+ggplot() +
+  geom_sf(data = states) +
+  geom_sf(data = wsb, fill = "light blue") +
+  geom_sf(data = cbb, fill = "blue", size = NA) +
+  geom_sf(data = dat.sf) +
+  coord_sf(crs = st_crs(5070)) # change to albers for plotting
+```
+
+
+##  Ice cover
+Ice cover effectively eliminates the exchange of gases between lakes and the atmosphere; therefore GHG emission rates are 0 during periods of ice cover.  Duration of ice cover during the winters of 2010 - 2020 was downloaded from the ERA-5 Land data set (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land?tab=overview) and spatially joined to the centroid of the NHD polygon for each waterbody in the watershed. Mean annual days of ice cover were calculated for each lake.
+```{r}
+# read in ice cover data--------------------
+iceCover <- st_read("output/iceCover.gdb", layer = "iceCoverFill") %>%
+  rename(day_of_ice_filled = DAY_OF_ICE_1) %>%
+  dplyr::select(WB_ID, day_of_ice_filled)
+
+# no missing values!
+iceCover %>% dplyr::filter(is.na(day_of_ice_filled))
+names(iceCover)
+
+# merge ice cover estimates with dat
+dim(dat) # 4222
+dat <- inner_join(dat, st_drop_geometry(iceCover))
+dim(dat) # 4222
+```
+
+```{r message = FALSE, fig.cap = "Ice cover duration during the 2010-2020 winter for waterbodies in Chesapeake Bay Watershed model"}
+ggplot(states) +
+  geom_sf(data = wsb) + # 
+  geom_sf(fill = NA) +
+  geom_sf(data = iceCover, aes(color = day_of_ice_filled)) +
+  coord_sf(crs = st_crs(5070)) # change to albers for plotting
+
+# ggsave("output/figures/iceCover.tiff")
+
+```
+
+# GHG model
+DelSontro et al. (2018) present linear regression models based on literature reports of chl concentration (ug/L), TP concentration (ug/L) and areal GHG emission rates (mg CH~4~-C m^-2^ day^-1^).  The models were created on the log-log scale with a small positive offset to accommodate negative areal emission rates reported in the literature.  Below we read in the model objects.
+
+```{r }
+# Total CH4 model.  mg CH4-C m-2 d-1
+# read from disk
+mod.ch4 <- readRDS("store/pCh4.rds")
+summary(mod.ch4) # review model
+
+# CO2 model.  mg CO2-C m-2 d-1
+mod.co2 <- readRDS("store/pCo2.rds")
+summary(mod.co2) # review model
+
+# N2O model. mg N2O-n m-2 day-1
+mod.n2o <- readRDS("store/pn2o.rds")
+summary(mod.n2o) # review model
+```
+
+The models predict emission rates as log10(emission rate + positive offset) with the emission rate in units of mg CH~4~-C m^-2^ day^-1^, mg CO~2~-C m^-2^ day^-1^, or mg N~2~O-N m^-2^ day^-1^.  Predictions are back transformed to linear space and converted from mg of C or N, to mass of CH~4~, CO~2~, or N~2~O via helper functions.
+```{r}
+# little function to get CH4 in desired units
+pCh4 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CH4-C m-2 d-1)
+  mgCh4c <- 10^(x) - 1 # unlog, then subtract 1
+  mgCh4 <- mgCh4c * (16/12) # mg CH4-C -> mg CH4
+  return(mgCh4)
+}
+
+# little function to get CO2 in desired units
+pCo2 <- function(x) { # x is output from above model which predicts log10(CH4-C +1)  (mg CO2-C m-2 d-1)
+  mgCo2c <- 10^(x) - 43 # unlog, then subtract 43
+  mgCo2 <- mgCo2c * (44/12) # mg CO2-C -> mg CO2
+  return(mgCo2)
+}
+
+# little function to get N2O in desired units
+pN2o <- function(x) { # x is output from above model which predicts log10(N2O-N)  (mg N2O-N m-2 d-1)
+  mgN2on <- 10^(x) - 0.25 # unlog, then subtract 0.25
+  mgN2o <- mgN2on * (44/28) # mg N2O-N -> mg N2O  28mg N in N2O
+  return(mgN2o)
+}
+```
+
+
+# Upscaling
+## GHG Emissions and Uncertainty Estimates
+
+We use the DelSontro et al. (2018) models to predict areal GHG emission rates (mg GHG m^-2^ day^-1^) for each waterbody under the 2010 and TMDLnew scenarios.  Uncertainty in emission rate predictions for each waterbody was estimated by randomly sampling from the distribution of the model coefficients using their covariance matrix to accommodate correlation within draws. We iterate this with 10,000 random draws.
+
+<!-- Krinsky, I and A. L. Robb. 1986. “On Approximating the Statistical Properties of Elasticities.” Review of -->
+<!-- Economic and Statistics 68: 715-719. -->
+#### CH4
+```{r results='hide', message=FALSE, warning=FALSE}
+## build data for simulation
+datKR =
+  inner_join(as_tibble(dat.sf), 
+             as_tibble(iceCover))
+
+## get lake data, add climate zone and type
+## climate zone and type file created in get_ipcc_climate_zones.r
+lakes =
+  left_join(
+    datKR %>% 
+      dplyr::select(WB_ID, AREASQKM, day_of_ice_filled),
+    read_csv('store/climate_zones_for_ches_waterbodies.csv') %>% 
+      mutate(WB_ID = as.character(WB_ID)),
+    by = 'WB_ID'
+  )
+
+
+## get number of summer and winter days
+warm.days = as.numeric(mdy('11.01.2020') - mdy('04.01.2020')) # emissions during 7 warm months (April 1 - Nov. 1)
+cold.days = as.numeric(mdy('03.31.2021') - mdy('11.01.2020')) # 5 months of open-water winter rates
+
+
+
+#####################################
+################################  CH4
+#####################################
+
+## 2010 Data
+dat_2010 <-  datKR %>%
+  dplyr::select(Chla2010) %>%
+  mutate('(Intercept)'=1, # match names in model
+         Chla2010 = log10(Chla2010 * 1e3)) %>% # mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)'=Chla2010) %>% # match names in model
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  datKR %>%
+  dplyr::select(ChlaTMDLnew) %>%
+  mutate('(Intercept)'=1,
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1e3)) %>% # mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+####  PREDICTIONS
+
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.ch4 = tibble()
+
+## set seed for replication
+set.seed(42)
+
+## number of simulations
+#N = 10 # 12/11/2023 3 minutes on laptop
+N = 1e4 # laptop: 9 minutes with pbreplicate, 2 minutes with future_replicate
+        # VM: 86 seconds with future_replicate
+
+plan("multisession") # parallel processing with future_replicate.
+
+tic()
+ch4 <- future_replicate(N, { ## future_replicate used parallel processing
+  
+  ## Distribution of coefficients 
+  coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
+  
+  ## Predictions based on model uncertainty
+  preds_2010_lakes <- cbind(lakes,
+                            # %*% matrix multiplication
+                            dat_2010 %*% coefs) # this produces emission rate as log10(CH4-C + offset)
+  preds_tmdl_lakes <- cbind(lakes,
+                            dat_tmdl %*% coefs)
+  
+  preds_2010_lakes %<>% mutate(preds_2010_lakes = pCh4(preds_2010_lakes$`dat_2010 %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
+  preds_tmdl_lakes %<>% mutate(preds_tmdl_lakes = pCh4(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # transform according to functions above -> mg CH4 m-2 day-1
+  
+  ##  Winter rate
+  # Waldo et al 2021.  Mean rate from Nov.1 - April 1 = 10.56 +/-11.52
+  # this generates a winter emission rate for each lake based on the mean and sd
+  # reported in Waldo et al.  Each lake will have a different winter rate, but 
+  # the same rate will be used for 2010 and tmdl scenarios
+  
+  # set.seed(42)
+  # ch4.winter <- rnorm(n = nrow(lakes), mean = 10.56, sd = 11.52) # mg CH4 m-2 d-1
+  ## we want a truncated normal such that winter rates don't extend beyond the tails of the summer emission rates
+  ## JB:  I concur.  Large negative values during the winter aren't realistic.
+  # set.seed(42)
+  ch4.winter.truncated <- rtruncnorm(n = nrow(lakes), a = -1, b = 4e3, mean = 10.56, sd = 11.52)
+  
+  ## discount winter ch4 emissions for the mass subject to methanotrophy during ice out.
+  ## literature reports that 1 - 50% of methane that accumulates under ice is subject to methanotrophy
+  ## during ice out.  See conversion_of_CH4_to_CO2.html
+  ch4.prop.methantrophy <- runif(n = nrow(lakes), min = 0.01, max = 0.6) # proportion of ch4 that is subject to methanotrophy
+  
+  ## methanotrophy: ch4 oxidized to co2, as opposed to being incorporated into microbial biomass
+  ## See conversion_of_CH4_to_CO2.html
+  ch4.to.co2 <- runif(n = nrow(lakes), min = 0.2, max = 0.95) # proportion of ch4 that oxidizes to co2 
+  
+  #################################
+  #################################
+  ## CH4 production rates during the winter are based on winter-rates measured in Waldo et al, but Waldo et al.
+  ## does not relate these rates to nutrients.  We want to model a TMDL affect of winter rates.  Since we don't have
+  ## a model to predict winter rates as a function of nutrients/chl, lets assume that the TMDL will change winter rates
+  ## by the same proportion that summer rates are changed.  This is calculated on a per-lake basis.
+  tmdl.winter = preds_tmdl_lakes$preds_tmdl_lakes / preds_2010_lakes$preds_2010_lakes
+  
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = # calculated in units of mg CH4 per year
+             # first half of summation is mg CH4 produced during open-water conditions (cold + warm days)
+             ((((preds_2010_lakes * warm.days) + (ch4.winter.truncated * (cold.days - day_of_ice_filled))) ) +   
+                # second half of summation is mg CH4 produced under ice that remains after methanotrophy
+                (ch4.winter.truncated * day_of_ice_filled * (1-ch4.prop.methantrophy))) * 
+             1e6 * AREASQKM) #1000000m2=1km2.
+  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = # calculated in units of mg CH4 per year
+             ((preds_tmdl_lakes * warm.days) + # CH4 produced in warm days under TMDL (mg CH4/m2)
+                # tmdl.winter term modifies the winter rate to reflect TMDL on winter production
+                ((ch4.winter.truncated * tmdl.winter) * (cold.days - day_of_ice_filled)) + # cold days CH4 under TMDL (mg CH4/m2)
+                ((ch4.winter.truncated * tmdl.winter) * day_of_ice_filled * (1 - ch4.prop.methantrophy))) * # add ch4 that remains after methanotrophy (mg CH4/m2)
+             1e6 * AREASQKM) #1000000m2=1km2.
+  
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  
+
+  ## export climate zone specific emissions to extrapolate to mississippi river basin
+  emissions.by.type.ch4 = 
+    bind_rows(
+      emissions.by.type.ch4,
+      left_join(
+        left_join(
+          aggregate((preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes)/preds_2010_lakes$preds_2010_lakes, 
+                    list(preds_2010_lakes$type, 
+                         preds_2010_lakes$climate.zone), 
+                    FUN = mean) %>% 
+            rename(type         = Group.1,
+                   climate.zone = Group.2, 
+                   incr.ch4.mean.pct = x),
+          aggregate((ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
+                    list(preds_2010_lakes$type,
+                         preds_2010_lakes$climate.zone),
+                    FUN = mean) %>% 
+            rename(type         = Group.1,
+                   climate.zone = Group.2,
+                   methanotrophy.co2.2010.mean = x), 
+          by = c('type', 'climate.zone')
+        ),
+        aggregate((ch4.winter.truncated * tmdl.winter * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * 44/16)  / (1e3*1e3*1e3), 
+                  list(preds_2010_lakes$type,
+                       preds_2010_lakes$climate.zone),
+                  FUN = mean) %>% 
+          rename(type         = Group.1,
+                 climate.zone = Group.2, 
+                 methanotrophy.co2.tmdl.mean = x), 
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.methanotrophy.co2.mean = methanotrophy.co2.2010.mean - methanotrophy.co2.tmdl.mean) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.ch4.mean.pct           = mean(incr.ch4.mean.pct, na.rm = T),
+              incr.methanotrophy.co2.mean = mean(incr.methanotrophy.co2.mean, na.rm = T),
+              .groups = 'drop')
+  
+  ## This list will be populated with each iteration of the simulation and will be
+  ## assigned to the object 'ch4'
+  ## Convert and take difference in predictions and sum across all lakes and store CO2 from methanotrophy
+  ## also catch lake-specific results from each iteration
+  list(
+    # row 1:  CH4 incremental change, summed across all lakes
+    incr.ch4 = sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE),
+    
+    # row 2:  CO2 produced via methanotrophy under ice in 2010
+    methanotrophy.co2.2010 = (ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    
+    # row 3:  CO2 produced via methanotrophy under ice in tmdl scenario
+    methanotrophy.co2.tmdl =   (ch4.winter.truncated * tmdl.winter * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    
+    # row 4:  emissions by IPCC categories for MRB extrapolation
+    emissions.by.type.ch4,
+    
+    # row 5: lake specific results for 2010 scenario
+    preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
+    
+    # row 6:  lake specific results for tmdl scenario
+    preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes))
+})
+toc()
+plan("sequential") # turn off parallel processing
+
+
+## EXTRACT AND NAME RELEVANT VECTORS------------------
+diff_ch4 = unlist(ch4[1,]) # 1 MG = 1 metric ton = 1000kg
+
+# co2 from ch4 for each lake and simulation in 2010.  10000 simulations of ~4200 lakes
+co2.from.ch4.2010 = data.frame(co2.from.ch4.Mg = unlist(ch4[2,]), # 1 MG = 1 metric ton = 1000kg
+                               WB_ID = ch4[[5,1]]$WB_ID, # for merging
+                               simulation = rep(1:N, each = nrow(ch4[[5]]))) # called in co2 calcs below
+
+# co2 from ch4 for each lake and simulation in tmdl.  10000 simulations of ~4200 lakes
+co2.from.ch4.tmdl = data.frame(co2.from.ch4.Mg = unlist(ch4[3,]), # 1 MG = 1 metric ton = 1000kg
+                               WB_ID = ch4[[6,1]]$WB_ID, # for merging
+                               simulation = rep(1:N, each = nrow(ch4[[6]]))) # called in co2 calcs below
+
+emissions.by.type.ch4 = ch4[4, N] ## keep just the final mean... clearly a cleaner way but this works
+
+
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+ch4.by.lake <- list(ch4[6,], # tmdl scenario.  
+            ch4[5,])  %>% # 2010 scenario
+  flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
+  #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
+  purrr::map(., function(.x) {
+    .x %>% 
+      dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
+      # create new column specifying scenario.
+      mutate(scenario = case_when(any(str_detect(names(.), "tmdl")) ~ "tmdl",
+                                  any(str_detect(names(.), "2010")) ~ "2010",
+                                  TRUE ~ "FLY YOU FOOLS!")) %>%
+      # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
+      set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
+       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
+  }) %>%
+  # collapse into single data frame.  data.table implementation of rbind is fast
+  data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
+  group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
+  summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
+  ungroup() %>%
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_ch4"), contains("preds"))
+toc() 
+
+## check values
+summary(diff_ch4)
+summary(co2.from.ch4.2010)
+summary(co2.from.ch4.tmdl)
+emissions.by.type.ch4
+head(ch4.by.lake)
+
+## clean house
+#rm(ch4)
+#gc()
+```
+#### CO2
+```{r results='hide', message=FALSE, warning=FALSE}
+#####################################
+################################  CO2
+#####################################
+
+#### PARTS 
+## 2010 Data
+dat_2010 =
+  datKR %>%
+  dplyr::select(Pvv2010,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         TP..ug.L. = log10(Pvv2010 * 1e3), #mg/L -> ug/L
+         'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
+  dplyr::select(-Pvv2010) %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl =
+  datKR %>%
+  dplyr::select(PvvTMDLnew,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         TP..ug.L. = log10(PvvTMDLnew * 1e3),
+         'log10(Surface.Area..km2.):log10(TP..ug.L.)' = AREASQKM*TP..ug.L.) %>%
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(TP..ug.L.)'=TP..ug.L.) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(TP..ug.L.)','log10(Surface.Area..km2.):log10(TP..ug.L.)') %>%
+  dplyr::select(-PvvTMDLnew) %>%
+  as.matrix()
+
+####  PREDICTIONS
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.co2 = tibble()
+
+## empty object to collect results
+diff_co2 <- NULL 
+co2 <- list() # for list of lake-specific co2 emission rates
+
+## number of simulations
+N = 1e4
+#N = 10
+tic() # 2 hours
+## using for loop because i need to reference index i.
+for (i in 1:N) {
+  
+  ## print where you are in the loop
+  print(i)
+  
+  ## distribution of coefficients 
+  coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
+  
+  ## predictions based on model uncertainty.  log10(CO2-C + offset) [mg co2-c m-2 d-1]
+  preds_2010_lakes <- cbind(lakes,
+                            dat_2010 %*% coefs)
+  preds_tmdl_lakes <- cbind(lakes,
+                            dat_tmdl %*% coefs)
+  
+  ##  Winter rate
+  # Data are mixed for CO2.  Jones et al 2016 report uptake during summer and outgassing
+  # during winter for midwestern lakes.  Knoll et al reports sustained outgassing for an Ohio
+  # Lake.  I think it best to assume that production rates are equal to predicted emissions
+  # rates throughout the year.  CO2 produced during periods of ice cover will be emitted to 
+  # atmosphere during ice out.
+  
+  #################################
+  #################################
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = pCo2(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
+  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
+  
+  # scale to entire year.  Assume rates apply to warm, cold, and ice cover days.
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = (preds_2010_lakes * (365)) * # apply to 365 days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
+  
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365)) * # apply to 365 days
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
+  
+  ## store emissions by type
+  emissions.by.type.co2 =
+    bind_rows(
+      emissions.by.type.co2,
+      left_join(
+        preds_2010_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_2010_lakes = mean(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        preds_tmdl_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.co2.mean = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.co2.mean.pct = mean(incr.co2.mean, na.rm = T),
+              .groups = 'drop') %>% 
+    ungroup 
+  
+  ## Add CO2 produced from methanotrophy
+  # 2010 first
+  co2.from.ch4.2010.i <- co2.from.ch4.2010 %>%
+    filter(simulation == i) %>%
+    dplyr::select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
+  
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = 
+             (preds_2010_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
+             co2.from.ch4.2010.i)
+  
+  # tmdl next
+  co2.from.ch4.tmdl.i <- co2.from.ch4.tmdl %>%
+    filter(simulation == i) %>%
+    select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
+  
+  preds_tmdl_lakes %<>%
+    mutate(preds_tmdl_lakes = 
+             (preds_tmdl_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
+             co2.from.ch4.tmdl.i) # co2 from ch4 for all lakes/simulations
+  
+  co2[[i]] <- list(preds_2010_lakes, preds_tmdl_lakes)
+  
+  ## convert and take difference in predictions and sum across all lakes
+  diff_co2[i] <- sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T)
+  
+}
+toc()
+
+## inspect results
+summary(diff_co2)
+emissions.by.type.co2
+
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+co2.by.lake <- co2 %>% # list of 10,000 elements.  each element is a list of 2 (tmdl and 2010)
+  flatten() %>% # Flatten creates a list of 20,000 elements
+  #.[1:2] %>% # first tmdl and 2010 for development
+  purrr::map(., function(.x) {
+    .x %>% 
+      dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
+      # create new column specifying scenario.
+      mutate(scenario = case_when(any(str_detect(names(.), "tmdl")) ~ "tmdl",
+                                  any(str_detect(names(.), "2010")) ~ "2010",
+                                  TRUE ~ "FLY YOU FOOLS!")) %>%
+      # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
+      set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
+       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
+  }) %>%
+  # collapse into single data frame.  data.table implementation of rbind is fast
+  data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
+  group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
+  summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
+  ungroup() %>%
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_co2"), contains("preds"))
+toc()
+
+```
+
+#### N2O
+```{r results='hide', message=FALSE, warning=FALSE}
+#####################################
+################################  N20
+#####################################
+
+## 2010 Data
+dat_2010 <-  datKR %>%
+  dplyr::select(Chla2010,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         Chla2010 = log10(Chla2010 * 1e3)) %>% # mg L-1 -> ug L-1
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=Chla2010) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  datKR %>%
+  dplyr::select(ChlaTMDLnew,AREASQKM) %>%
+  mutate('(Intercept)'=1,
+         AREASQKM = log10(AREASQKM),
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1e3)) %>% # mg L-1 -> ug L-1
+  rename('log10(Surface.Area..km2.)'=AREASQKM,'log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
+  relocate('(Intercept)','log10(Surface.Area..km2.)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+
+####  PREDICTIONS
+## empty canvas for storing climate zone specific emissions factors
+emissions.by.type.n2o = tibble()
+
+## number of simulations
+N = 1e4
+#N=10
+
+## simulation
+plan("multisession") # turn on parallel processing
+tic() # 1 minute
+n2o <- future_replicate(N, {
+  
+  ## Distribution of coefficients 
+  coefs = MASS::mvrnorm(1, mu = coef(mod.n2o), Sigma = vcov(mod.n2o))
+  
+  ## Predictions based on model uncertainty
+  preds_2010_lakes <- cbind(lakes,
+                            dat_2010 %*% coefs)
+  preds_tmdl_lakes <- cbind(lakes,
+                            dat_tmdl %*% coefs)
+  
+  # Winter rates
+  # Few annual data available for N2O.  Kortelainen et al. 2020 reported peak N2O during winter in Finnish lakes,
+  # but Beaulieu et al. 2010 reported peak N2O during summer in the Ohio River and negligable N2O during the
+  # winter.  I think it best to assume that production rates are equal to predicted emissions
+  # rates throughout the year.  N2O produced during periods of ice cover will be emitted to 
+  # atmosphere during ice out.  
+  
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = pN2o(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg N2O m-2 day-1
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = pN2o(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg N2O m-2 day-1
+  
+  # open water rates: mg N2O y-1
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = (preds_2010_lakes * 365) * # scale to year 
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O y-1
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = (preds_tmdl_lakes * 365) * # scale to year
+             1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg N2O y-1
+  
+  # unit conversion
+  preds_2010_lakes %<>% 
+    mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  preds_tmdl_lakes %<>% 
+    mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+  
+  ## store emissions by type
+  emissions.by.type.n2o =
+    bind_rows(
+      emissions.by.type.n2o,
+      left_join(
+        preds_2010_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_2010_lakes = mean(preds_2010_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        preds_tmdl_lakes %>% 
+          group_by(type, climate.zone) %>% 
+          summarize(preds_tmdl_lakes = mean(preds_tmdl_lakes / (1e3*1e3*1e3), na.rm = T), 
+                    .groups = 'drop'),
+        by = c('type', 'climate.zone')
+      ) %>% 
+        mutate(incr.n2o.mean.pct = (preds_2010_lakes - preds_tmdl_lakes)/preds_2010_lakes) 
+    ) %>% 
+    group_by(type, climate.zone) %>% 
+    summarize(incr.n2o.mean.pct = mean(incr.n2o.mean.pct, na.rm = T),
+              .groups = 'drop') %>% 
+    ungroup 
+  
+  ## Convert and take difference in predictions and sum across all lakes
+  list(
+    # row 1: incremental N2O
+    sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T),
+    
+    # row 2:  n2o by IPCC category for MRB extrapolation
+    emissions.by.type.n2o,
+    
+    # row 3: lake specific results for 2010 scenario
+    preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
+    
+    # row 4:  lake specific results for tmdl scenario
+    preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes)
+  )
+})
+toc()
+plan("sequential") # turn off parallel processing
+
+diff_n2o = unlist(n2o[1,])
+emissions.by.type.n2o = n2o[2, N]
+
+
+## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
+# Mean lake specific results for plotting.
+tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+n2o.by.lake <- list(n2o[3,], # 2010 scenario.  
+            n2o[4,])  %>% # 2010 scenario
+  flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
+  #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
+  purrr::map(., function(.x) {
+    .x %>% 
+      dplyr::select(WB_ID, AREASQKM, contains("preds")) %>% # pull out needed columns to reduce memory demands
+      # create new column specifying scenario.
+      mutate(scenario = case_when(any(str_detect(names(.), "tmdl")) ~ "tmdl",
+                                  any(str_detect(names(.), "2010")) ~ "2010",
+                                  TRUE ~ "FLY YOU FOOLS!")) %>%
+      # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
+      set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
+       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
+  }) %>%
+  # collapse into single data frame.  data.table implementation of rbind is fast
+  data.table::rbindlist(.) %>% # full_join and bind_cols take forever.  3 minutes with rbindlist
+  group_by(WB_ID, scenario) %>% # each lake is repeated 10,000 times in DF.  group by lake..
+  summarize(across(everything(), mean)) %>% # then calculate average emissions, per lake, across all 10,000 iterations
+  ungroup() %>%
+  pivot_wider(names_from = scenario, values_from = contains("preds")) %>% # cast to wide
+  rename_with(~paste0(., "_n2o"), contains("preds"))
+toc()
+
+
+
+
+## check values
+summary(diff_n2o)
+emissions.by.type.n2o
+head(n2o.by.lake)
+```
+
+#### Consolidate lake specific results
+```{r}
+## combine lake specific simulation results with lake info
+# dat.sf is spatial version of chesDat.  See lines 132-145
+dat.sf <- inner_join(dat.sf, st_drop_geometry(iceCover)) %>% # merge lake data with ice cover
+  list(., ch4.by.lake, co2.by.lake, n2o.by.lake) %>% # list of merged object plus lake specific simulation data
+  # Each object has WB_ID and AREASQKM
+  reduce(full_join, by = c("WB_ID", "AREASQKM")) # keep all records
+
+# any change in number of obsservations? - NO, good
+list(dat.sf, iceCover, ch4.by.lake, co2.by.lake, n2o.by.lake) %>% 
+  purrr::map(., dim) # all have 4222 lakes
+dim(dat.sf) # 4222 lakes!
+  
+```
+
+#### Incremental change table + export for MRB extrapolation
+```{r}
+
+## export emissions by climate zone and type
+emissions.by.type.ch4[[1]] %>% write_csv('output/emissions_by_lake_characteristics_ch4.csv')
+emissions.by.type.co2 %>% write_csv('output/emissions_by_lake_characteristics_co2.csv')
+emissions.by.type.n2o[[1]] %>% write_csv('output/emissions_by_lake_characteristics_n2o.csv')
+
+kr_simulations <- data.frame(mean_ch4 = round(mean(diff_ch4), 0),
+                             uppr_ch4 = round(quantile(diff_ch4, .95), 0),
+                             lowr_ch4 = round(quantile(diff_ch4, .05), 0),
+                             mean_co2 = round(mean(diff_co2), 0),
+                             uppr_co2 = round(quantile(diff_co2, .95), 0),
+                             lowr_co2 = round(quantile(diff_co2, .05), 0),
+                             mean_n2o = round(mean(diff_n2o), 1),
+                             uppr_n2o = round(quantile(diff_n2o, .95), 1),
+                             lowr_n2o = round(quantile(diff_n2o, .05), 1))
+rownames(kr_simulations) <- c()
+
+kr_simulations %>%
+  kbl(col.names = rep(c("mean", "upper 95", "lower 5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from simulation (Krinsky and Robb, 1986)") %>%
+  add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+```
+
+
+
+# Manuscript Figures
+Lake polygons are too small to clearly show on map.  Here we calculate lake centroids and store as points spatial object for plotting.  Differences in variables between 2010 and post implementation of TMDL policy is added as attributes.
+
+```{r}
+dat.pt <- st_centroid(dat.sf)
+
+# first, lets add new fields to the data object
+dat.pt <- dat.pt %>% mutate(ch4diff_g_m2_y = preds_lakes_g_m2_y_2010_ch4 - preds_lakes_g_m2_y_tmdl_ch4,
+                            co2diff_g_m2_y = preds_lakes_g_m2_y_2010_co2 - preds_lakes_g_m2_y_tmdl_co2,
+                            n2odiff_g_m2_y = preds_lakes_g_m2_y_2010_n2o - preds_lakes_g_m2_y_tmdl_n2o,
+                            ch4diffMg = preds_lakes_Mg_2010_ch4 - preds_lakes_Mg_tmdl_ch4,
+                            co2diffMg = preds_lakes_Mg_2010_co2 - preds_lakes_Mg_tmdl_co2,
+                            n2odiffMg = preds_lakes_Mg_2010_n2o - preds_lakes_Mg_tmdl_n2o,
+                            n2odiffKg = n2odiffMg * 1000, # rescale to kg
+                            ChlaDiff = Chla2010 - ChlaTMDLnew,
+                            pDiff = Pvv2010 - PvvTMDLnew)
+
+plot(dat.pt$geometry)
+```
+
+Reshape TMDL and 2010 scenarios into longer format for cdf plots.
+```{r}
+dat.long <- dat.pt %>% st_drop_geometry() %>%
+  dplyr::select(Chla2010, ChlaTMDLnew,
+                Pvv2010, PvvTMDLnew,
+                preds_lakes_g_m2_y_2010_ch4, preds_lakes_g_m2_y_tmdl_ch4,
+                preds_lakes_g_m2_y_2010_co2, preds_lakes_g_m2_y_tmdl_co2,
+                preds_lakes_g_m2_y_2010_n2o, preds_lakes_g_m2_y_tmdl_n2o) %>%
+  pivot_longer(cols = everything()) %>%
+  mutate(scenario = case_when(grepl("tmdl", name, ignore.case = TRUE) ~ "TMDL",
+                              grepl("2010", name) ~ "Baseline",
+                              TRUE ~ "WazUp!"))
+
+
+```
+
+
+## Figure 3: CDF and spatial of TP and Chla with rainbow color ramp
+```{r}
+#Figure 3
+# 4 panel plot of chl cdf, chl diff spatial plot, tp cdf, tp diff spatial
+
+# chl figure
+# better without extreme values.  Remove single lake with really large chla value
+# (>200ug/L) and  greater chla after TMDL implementation
+filter(dat.pt, Chla2010 > 0.2 & ChlaDiff < 0) # one lake
+
+p1 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(ChlaDiff), 
+          aes(color = ChlaDiff * 1000)) + # *1000 for mg -> ug
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "B") +
+  labs(color = "Chl a\nreduction (ug/L)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        axis.title = element_blank()) + 
+  scale_color_gradientn(colors = rainbow(5))
+
+# chl.ecdf as above
+chl.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)), 
+             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+  stat_ecdf(geom="step", pad = FALSE) +
+  xlim(0, 125) + # otherwise extreme values obscure patterns
+  ylab("Proportion of Lakes") +
+  xlab("chlorophyll a (ug/L)") +
+  annotate("text", x = 0, y = 1, label = "A") +
+  theme_bw() +
+  theme(legend.position = c(0.8, 0.4),
+        legend.title = element_blank())
+
+# TP figure
+p2 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(pDiff), 
+          aes(color = pDiff * 1000)) + # *1000 for mg -> ug
+  geom_sf(data = cbb, fill = "white", size = 0.1) + #size = NA
+  annotate("text", x = -80, y = 43, label = "D") +
+  labs(color = "TP\nreduction (ug/L)", size = "Lake size (km2)") +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        axis.title = element_blank()) + 
+  scale_color_gradientn(colors = rainbow(5))
+
+
+
+tp.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)), 
+             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+  stat_ecdf(geom="step", pad = FALSE) +
+  xlim(0, 250) +
+  ylab("Proportion of Lakes") +
+  xlab("Total phosphorus (ug/L)") +
+  annotate("text", x = 0, y = 1, label = "C") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+g <- gridExtra::grid.arrange(chl.ecdf, p1, tp.ecdf, p2, ncol = 2, nrow = 2)
+
+ggsave(file = "output/figures/Fig.3_rainbow.tiff", g, width = 7.5, height = 6.0, units = "in")
+
+
+
+
+
+
+```
+
+
+## Figure 4: areal N2O, CH4, CO2 reductions spatial
+```{r}
+# CH4 figure
+p4 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(ch4diff_g_m2_y), 
+          aes(color = ch4diff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "A") +
+  labs(color = expression(atop(CH[4]~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(), # plot space background
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") + 
+  scale_color_gradientn(colors = rainbow(5))
+
+
+# CO2 figure
+p5 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(co2diff_g_m2_y), 
+          aes(color = co2diff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "B") +
+  labs(color = expression(atop(CO[2]~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") +
+  scale_color_gradientn(colors = rainbow(5))
+
+
+# N2O figure
+p6 <- ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = filter(dat.pt, Chla2010 < 0.2 & ChlaDiff > 0) %>%
+            arrange(n2odiff_g_m2_y), # plot higher value points on top of lower
+          aes(color = n2odiff_g_m2_y)) +
+  geom_sf(data = cbb, fill = "white", size = 0.1) +
+  annotate("text", x = -80, y = 43, label = "C") +
+  labs(color = expression(atop(N[2]*O~change, (g~m^{-2}~y^{-1})))) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        legend.justification = c(0,1),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top") +
+  scale_color_gradientn(colors = rainbow(5), breaks = c(0.01, 0.05, 0.1))
+
+
+cowplot::plot_grid(p4, p5, p6, ncol = 3, nrow = 1, align = "hv")
+
+ggsave(file = "output/figures/figure4.tiff", width = 7, height = 5, units = "in")
+
+```
+
+## Figure 5: cumulative plot of total emission reductions by lake size
+```{r fig5}
+# total reduction by lake size
+dat.cum.emissions <- dat.pt %>%
+  st_drop_geometry() %>%
+  arrange(AREASQKM) %>%
+  select(AREASQKM, ch4diffMg, co2diffMg, n2odiffKg) %>%
+  mutate(across(contains("diff"), cumsum)) %>%
+  pivot_longer(!AREASQKM, values_to = "emission") %>%
+  group_by(name) %>%
+  mutate(ninety = 0.9*max(emission), # this grabs 90% of total emission reduction
+         max = max(emission))
+
+######## this chunk grabs rows corresponding to 90% of total reduction for each gas
+######## I thought about adding these via geom_vline to plot, but decided against it
+# identify row corresponding to 90% of total emission reductions
+index.ninety <- dat.cum.emissions %>%
+  summarize(index = which.min(abs(emission - unique(ninety))))
+
+ninety <- dat.cum.emissions %>% # grab the row corresponding to 90% of total reductions
+  group_by(name) %>%
+  slice(index.ninety$index)
+  
+###### make the figure
+dat.cum.emissions %>%
+  ggplot(aes(AREASQKM, emission, color = name)) + 
+  geom_point(size = 1) + geom_line() +
+  scale_x_log10() +
+  # change name of legend items
+  scale_color_discrete(labels = c(expression(CH[4]), expression(CO[2]), expression(N[2]*O))) +
+  ylab(expression(atop("Cumulative emission reductions",
+  paste("(mt ", CO[2], ", mt ", CH[4], ", kg ", N[2], "O)")))) +
+  xlab(expression(Waterbody ~ surface ~ area ~ (km^{2}))) +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        legend.position = "top",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 7))
+
+
+ggsave(file = "output/figures/Figure5.tiff", width = 3, height = 2.5, units = "in")
+```
+
+## Supplemental Figure 1
+```{r supplementalFig1}
+# reduction in areal CH4 emission rate vs latitude
+dat.lat <- dat.pt %>%
+  filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
+  mutate(lat = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  dplyr::select(lat, ChlaDiff, pDiff, contains("diff_g")) %>%
+  mutate(ChlaDiff = ChlaDiff *1000, # mg/l --> ug/L
+         pDiff = pDiff * 1000) %>% # mg/l --> ug/L
+  pivot_longer(cols = !lat) %>%
+  # this trick below controls placement of facets
+  mutate(name = factor(name, levels = c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y","pDiff", "ChlaDiff")))
+ 
+# custom labels for facets.  This is a DF containing a custom label for each row in data.lat
+facet.labs <- dat.lat %>% select(name) %>%
+  mutate(name = case_when(name == "ch4diff_g_m2_y" ~ "CH[4]", # note subscript picked up below
+                           name == "ChlaDiff" ~ "chlorophyll~a",
+                           name == "co2diff_g_m2_y" ~ "CO[2]",
+                           name == "n2odiff_g_m2_y" ~ "N[2]*O",
+                           name == "pDiff" ~ "total~phosphorus"))
+facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
+
+p1 <- ggplot(dat.lat %>% filter(name %in% c("ChlaDiff", "pDiff")), aes(lat, value)) +
+  geom_point() +
+  facet_wrap(~name, scales = "free", 
+             labeller = as_labeller(facet.labs, # custom labels
+                                    default = label_parsed)) + # this applies formatting
+  ylab(expression(atop("Baseline - TMDL", "("*mu*"g"~L^{-1}*")"))) +
+  theme(axis.title.x = element_blank())
+
+ggsave(p1, file = "output/figures/supplementalFigure1A.tiff", width = 6.9*(2/3), height = 2.5, units = "in")
+
+p2 <- ggplot(dat.lat %>% filter(name %in% c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y")), 
+             aes(lat, value)) +
+  geom_point() +
+  facet_wrap(~name, scales = "free", 
+             labeller = as_labeller(facet.labs, # custom labels
+                                    default = label_parsed)) + # this applies formatting
+  ylab(expression(atop("Baseline - TMDL", "(g"~m^{-2}~year^{-1}*")"))) +
+  xlab("latitude")
+ggsave(p2, file = "output/figures/supplementalFigure1B.tiff", width = 7, height = 2.7, units = "in")
+
+# ended up stitching together in .ppt.  Couldn't get separate y-axis labels and proper facet sizes
+# with cowplot.  
+```
+
+
+## Supplemental Figure 2
+```{r supplementalFig2}
+# Reduction in emission rates (mg GHG m-2 d-1) is proportional to reduction in chl
+ggplot(dat.pt, aes(ChlaDiff, ch4diff_g_m2_y)) +
+  geom_point(size = 0.5) +
+  ylim(-25, 60) + # cut out a few points with large negative values
+  xlim(-0.03, 0.075) +
+  ylab(expression(atop(CH[4]~emission~rate, Baseline~-~TMDL~(g~m^{-2}~y^{-1})))) +
+  xlab(expression(atop(chlorophyll~a, Baseline~-~TMDL~(mu*g~L^{-1})))) +
+  theme(axis.title = element_text(size = 10))
+
+ggsave("output/figures/supplementalFigure2.tiff", width = 3, height = 3, units = "in")
+
+
+```
+## Supplemental Figure 3: ice cover
+```{r supplementalFig3}
+ ggplot() +
+  geom_sf(data = wsb) +
+  geom_sf(data = dat.pt, aes(color = day_of_ice_filled), size =1) +
+  geom_sf(data = cbb, fill = "white", size = NA) +
+  labs(color = expression("Ice cover \n duration (days)")) +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 7),
+        axis.text = element_text(size = 7))
+
+ggsave(file = "output/figures/supplementalFigure3.tiff", width = 4, height = 3, units = "in")
+```
+
+## Supplemental Figure 4: delta CO2 vs delta chla
+```{r supplementalFig4}
+# Change in CO2 areal emission rate (g CO2 m-2 y-1) vs waterbody size
+ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + 
+  geom_point(size = 0.5) + 
+  scale_x_log10() +
+  ylab(expression(atop(CO[2]~emission~rate, Baseline~-~TMDL~(g~m^{-2}~y^{-1})))) +
+  xlab(expression(waterbody~surface~area~(km^{2}))) +
+  theme(axis.title = element_text(size = 10))
+
+ggsave(file = "output/figures/supplementalFigure4.tiff", width = 3, height = 3, units = "in")
+```
+
+## Supplemental Figure 5: lake size histogram
+```{r supplementalFig5}
+# See 'Lake size distribution' section
+# lake size histogram
+ggplot(dat.pt, aes(x=AREASQKM)) + 
+  geom_histogram(bins = 75) + 
+  scale_x_log10() +
+  xlab(expression(Waterbody~surface~area~(km^{2}))) +
+   theme(axis.title = element_text(size = 10))
+
+ggsave("output/figures/supplementalFigure5.tiff", width = 3, height = 3, units = "in")
+
+```
+
+## Supplemental Table 1  
+```{r supplementalTable1}
+dat.pt %>% 
+  st_drop_geometry() %>% # remove spatial
+  dplyr::select(Chla2010, Pvv2010,
+                ChlaTMDLnew, PvvTMDLnew,
+                AREASQKM) %>% 
+  mutate(across(matches(c("2010|new")), ~ .*1e3)) %>% # *1e3 mg/L to ug/L
+  summarise(across(everything(), list(mean = ~mean(.),
+                                      median = ~median(.),
+                                      low.99 = ~quantile(., 0.01),
+                                      high.99 = ~quantile(., 0.99)))) %>%
+  pivot_longer(cols = everything()) %>%
+  mutate(# https://www.statology.org/r-extract-string-after-character/
+    stat = sub(".*_", "", name), # extract characters after string.  
+    name = sub("_.*", "", name)) %>% # extract characters before string
+  pivot_wider(names_from = stat, values_from = value) %>%
+  arrange(name)
+
+nrow(dat.pt) # 4222
+                                       
+
+
+
+```
+
+
+# Manuscript Stats
+## Policy effect on nutrients, chlorophyll, and area GHG emission rates  
+```{r}
+# how many sites with increased TP and chla under TMDL
+dat.pt %>% # 78 sites out of 4221 = 1.8%
+  st_drop_geometry() %>% 
+  as_tibble() %>%
+  filter(pDiff < 0 | ChlaDiff < 0) %>%
+  summarize(n = nrow(.))
+
+
+# TP and Chla:  average reduction across all sites
+map(dat.pt %>% select(pDiff, ChlaDiff) %>% mutate(across(everything(), ~ .x * 1000)), summary)
+
+# TP and Chla:  average % reduction across all sites  
+# 21.1 and 21.4%, respectively.  Slightly different than when calculated using
+# data from extended data table 1 due to rounding errors.
+dat.pt %>% # 
+  st_drop_geometry() %>%
+  select(ChlaTMDLnew, Chla2010, PvvTMDLnew, Pvv2010) %>%
+  summarise(across(everything(), ~mean(.) * 1000)) %>%
+  mutate(perc_chla = (Chla2010 -  ChlaTMDLnew) / Chla2010 * 100,
+         perc_tp = (Pvv2010 - PvvTMDLnew) / Pvv2010 * 100)
+  
+# CH4: average change across sites
+map(dat.pt %>% select(ch4diff_g_m2_y, preds_lakes_g_m2_y_2010_ch4), summary) # 6.65
+dat.pt %>% mutate(ch4diff_perc = (ch4diff_g_m2_y / preds_lakes_g_m2_y_2010_ch4) * 100) %>%
+  {summary(.$ch4diff_perc)}
+
+# CO2: average change across sites
+map(dat.pt %>% select(co2diff_g_m2_y, preds_lakes_g_m2_y_2010_co2), summary) # 42
+
+dat.pt %>% filter(AREASQKM > 12) %>% 
+  select(AREASQKM, co2diff_g_m2_y, pDiff, ChlaDiff) %>% 
+  arrange(AREASQKM) # 4 large lakes w/<co2Diff
+
+dat.pt %>% filter(AREASQKM > 12) %>% 
+  select(AREASQKM, co2diff_g_m2_y, pDiff, ChlaDiff) %>% 
+ summarize(meanCo2Large = mean(co2diff_g_m2_y)) # 4 large lakes w/<co2Diff
+
+dat.pt %>% mutate(size = case_when(AREASQKM > 12 ~ "big", TRUE ~ "small")) %>%
+  {table(.$size)} # only 4 big lakes
+
+ggplot(dat.pt, aes(AREASQKM, co2diff_g_m2_y)) + geom_point()
+
+dat.pt %>% mutate(co2diff_perc = (co2diff_g_m2_y / preds_lakes_g_m2_y_2010_co2) * 100) %>%
+  {summary(.$co2diff_perc)} #4.9%
+
+# N2O: average change across sites
+map(dat.pt %>% select(n2odiff_g_m2_y, preds_lakes_g_m2_y_2010_n2o), summary) # 0.006
+dat.pt %>% mutate(n2odiff_perc = (n2odiff_g_m2_y / preds_lakes_g_m2_y_2010_n2o) * 100) %>%
+  {summary(.$n2odiff_perc)}
+
+
+
+```
+
+
+## Policy effect on GHG emissions
+```{r}
+
+# total GHG reductions
+kr_simulations %>%
+  kbl(col.names = rep(c("mean", "upper 95", "lower 5"), 3),
+      caption = "Incremental GHG (metric tons) calculated from simulation (Krinsky and Robb, 1986)") %>%
+  add_header_above(c("incremental CH4" = 3, "incremental CO2" = 3, "incremental N2O" = 3)) %>%
+  kable_classic()
+
+
+# this give lake size at specified probability
+quantile(dat.pt$AREASQKM, probs = 0.987) # 98.7% are <= 0.95796 km2
+
+
+# proportion of SA attributable to lakes < 1km2.  57%!!!
+dat.pt[dat.pt$AREASQKM <= 1, "AREASQKM"] %>% 
+  st_drop_geometry() %>%
+  sum() / #280.85
+  sum(dat.pt$AREASQKM) #491.626 km2
+
+# proportion of SA attributable to lakes > 1km2.  43%!!!
+dat.pt[dat.pt$AREASQKM >= 1, "AREASQKM"] %>% 
+  st_drop_geometry() %>%
+  sum() / #210.78
+  sum(dat.pt$AREASQKM) #491.626 km2
+
+# how many greater than 1km2
+dat.pt[dat.pt$AREASQKM >= 1, "AREASQKM"] %>% nrow() #54
+
+
+
+
+# total reduction by lake size
+dat.cum.emissions <- dat.pt %>%
+  st_drop_geometry() %>%
+  arrange(AREASQKM) %>%
+  select(AREASQKM, ch4diffMg, co2diffMg, n2odiffKg) %>%
+  mutate(across(contains("diff"), cumsum)) %>%
+  pivot_longer(!AREASQKM, values_to = "emission") %>%
+  group_by(name) %>%
+  mutate(max = max(emission))
+
+# total reduction for >1km2
+dat.cum.emissions %>%
+  slice(which.min(abs(AREASQKM - 1))) %>%
+  mutate(prop.less.1 = 1 - (emission / max))
+
+
+
+```
