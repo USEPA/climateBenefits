@@ -7,9 +7,10 @@ rm(list = ls())
 gc()
 
 ## this function will check if a package is installed, and if not, install it
+## All packages installed and managed vis RENV
 list.of.packages <- c('magrittr','tidyverse',
                       'sf',
-                      'arrow')
+                      'arrow', 'tictoc')
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages, repos = "http://cran.rstudio.com/")
 lapply(list.of.packages, library, character.only = TRUE)
@@ -49,44 +50,44 @@ mrb.states =
 ##################### data
 ##########################
 
-# ## read waterbodies from ghgrp within the mississippi river basin (from get_ghg_waterbodies_in_mrb.R)
-# mrb.waterbodies = 
-#   list.files('output/ghg_in_mrb/', pattern = "*.parquet", full.names = T) %>%
-#   map_df(~read_mrb_waterbodies(.)) %>% 
-#   .$globalid
-# 
-# ## read all waterbodies from ghgrp, filter to those in mississippi river basin
-# ## TO-DO test if SQL query will work for this filer to speed up the read_sf, query is available as an option in read_sf: query = "SELECT * FROM national WHERE globalid in mrb.waterbodies;"
-# data = 
-#   read_sf('../climateBenefits.gpkg') %>%
-#   dplyr::select(globalid, stusps, climate, subtype, area_ha_new, co2.tonnes.ha.y.2021, ch4.tonnes.ha.y.2021) %>% 
-#   filter(globalid %in% mrb.waterbodies)
-# 
-# ## get emissions by climate zone and type from main markdown
-# emissions.by.type = 
-#   left_join(
-#     left_join(
-#       read_csv('output/emissions_by_lake_characteristics_ch4.csv', show_col_types = F),
-#       read_csv('output/emissions_by_lake_characteristics_co2.csv', show_col_types = F),
-#       by = c('type', 'climate.zone')
-#     ),
-#     read_csv('output/emissions_by_lake_characteristics_n2o.csv', show_col_types = F),
-#     by = c('type', 'climate.zone')
-#   ) %>% 
-#   rename(subtype = type,
-#          climate = climate.zone) %>% 
-#   mutate(subtype = case_when(subtype == 'pond' ~ 'freshwater pond', T ~ subtype))
-# 
-# ## collect garbage
-# gc()
-# 
-# ## get average emissions rates by subtype and climate to identify closest subtypes and climates
-# data %>% 
-#   st_drop_geometry %>% 
-#   group_by(climate, subtype) %>% 
-#   summarize(co2.tonnes.ha.y.2021 = mean(co2.tonnes.ha.y.2021, na.rm = T),
-#             ch4.tonnes.ha.y.2021 = mean(ch4.tonnes.ha.y.2021, na.rm = T)) %>% 
-#   arrange(subtype, ch4.tonnes.ha.y.2021)
+## read waterbodies from ghgrp within the mississippi river basin (from get_ghg_waterbodies_in_mrb.R)
+mrb.waterbodies =
+  list.files('output/ghg_in_mrb/', pattern = "*.parquet", full.names = T) %>%
+  map_df(~read_mrb_waterbodies(.))
+
+## read all waterbodies from ghgrp, filter to those in mississippi river basin
+## TO-DO test if SQL query will work for this filer to speed up the read_sf, query is available as an option in read_sf: query = "SELECT * FROM national WHERE globalid in mrb.waterbodies;"
+data =
+  read_sf('store/climateBenefits.gpkg') %>%
+  dplyr::select(globalid, comid, stusps, climate, subtype, area_ha_new, co2.tonnes.ha.y.2021, ch4.tonnes.ha.y.2021) %>%
+  filter((comid %in% unique(na.omit(mrb.waterbodies$comid)))| 
+           (globalid %in% unique(na.omit(mrb.waterbodies$globalid))))
+
+## get emissions by climate zone and type from main markdown
+emissions.by.type =
+  left_join(
+    left_join(
+      read_csv('output/emissions_by_lake_characteristics_ch4.csv', show_col_types = F),
+      read_csv('output/emissions_by_lake_characteristics_co2.csv', show_col_types = F),
+      by = c('type', 'climate.zone')
+    ),
+    read_csv('output/emissions_by_lake_characteristics_n2o.csv', show_col_types = F),
+    by = c('type', 'climate.zone')
+  ) %>%
+  rename(subtype = type,
+         climate = climate.zone) %>%
+  mutate(subtype = case_when(subtype == 'pond' ~ 'freshwater pond', T ~ subtype))
+
+## collect garbage
+gc()
+
+## get average emissions rates by subtype and climate to identify closest subtypes and climates
+data %>%
+  st_drop_geometry %>%
+  group_by(climate, subtype) %>%
+  summarize(co2.tonnes.ha.y.2021 = mean(co2.tonnes.ha.y.2021, na.rm = T),
+            ch4.tonnes.ha.y.2021 = mean(ch4.tonnes.ha.y.2021, na.rm = T)) %>%
+  arrange(subtype, ch4.tonnes.ha.y.2021)
 
 # climate              subtype         co2.tonnes.ha.y.2021 ch4.tonnes.ha.y.2021
 # <chr>                <chr>                          <dbl>                <dbl>
@@ -109,34 +110,36 @@ mrb.states =
 ## for freshwater ponds and co2, cool temperate gets mapped to boreal, and warm temperate moist for everything else.
 ## for reservoirs and co2, the same is true, although there are only emission rates for three zones. 
 
-# ## get comparable climate zones for merging emissions reductions
-# data %<>% 
-#   mutate(climate.ches.bay = case_when(climate == 'Boreal' ~ 'Cool Temperate',
-#                                       T ~ 'Warm Temperate Moist'))
-# 
-# ## merge with chesapeake bay emissions reductions
-# data %<>% 
-#   left_join(emissions.by.type, 
-#             by = c('climate.ches.bay' = 'climate', 'subtype'))
-# 
-# ## estimate emissions for waterbodies in the mrb
-# data %<>% 
-#   mutate(co2.emissions = area_ha_new * co2.tonnes.ha.y.2021,
-#          ch4.emissions = area_ha_new * (ch4.tonnes.ha.y.2021 + (ch4.tonnes.ha.y.2021 * 0.09)),
-#          co2.reduction = co2.emissions * incr.co2.mean.pct,
-#          ch4.reduction = ch4.emissions * incr.ch4.mean.pct)
-# 
-# ## get total emissions reductions
-# data %>% 
-#   st_drop_geometry %>% 
-#   summarize(co2.reduction = sum(co2.reduction, na.rm = T),
-#             ch4.reduction = sum(ch4.reduction, na.rm = T))
-# 
-# ## count number of waterbodies with co2 emissions estimates
-# data %>% 
-#   st_drop_geometry %>% 
-#   filter(!is.na(co2.reduction)) %>% 
-#   nrow
+## get comparable climate zones for merging emissions reductions
+data %<>%
+  mutate(climate.ches.bay = case_when(climate == 'Boreal' ~ 'Cool Temperate',
+                                      T ~ 'Warm Temperate Moist'))
+
+## merge with chesapeake bay emissions reductions
+data %<>%
+  left_join(emissions.by.type,
+            by = c('climate.ches.bay' = 'climate', 'subtype'))
+
+## estimate emissions for waterbodies in the mrb
+data %<>%
+  mutate(co2.emissions = area_ha_new * co2.tonnes.ha.y.2021,
+         ch4.emissions = area_ha_new * (ch4.tonnes.ha.y.2021 + (ch4.tonnes.ha.y.2021 * 0.09)),
+         co2.reduction = co2.emissions * incr.co2.mean.pct,
+         ch4.reduction = ch4.emissions * incr.ch4.mean.pct)
+
+## get total emissions reductions
+# 103,404 tonnes CH4
+data %>%
+  st_drop_geometry %>%
+  summarize(co2.reduction = sum(co2.reduction, na.rm = T),
+            ch4.reduction = sum(ch4.reduction, na.rm = T))
+
+## count number of waterbodies with co2 emissions estimates
+# only 433.  Because IPCC only calculates for reservoirs < 20 years old
+data %>%
+  st_drop_geometry %>%
+  filter(!is.na(co2.reduction)) %>%
+  nrow
 # 
 # ## export results by state
 # for(STATE in mrb.states){
@@ -144,14 +147,14 @@ mrb.states =
 #     filter(stusps == STATE) %>%
 #     st_write(paste0('output/mrb_emissions_reductions/mrb_emissions_reductions_', STATE, '.shp'))
 # }
-# 
-# ## export results by state as text files
-# for(STATE in mrb.states){
-#   data %>%
-#     st_drop_geometry %>% 
-#     filter(stusps == STATE) %>%
-#     write_parquet(paste0('output/mrb_emissions_reductions_text/mrb_emissions_reductions_text_', STATE, '.parquet'))
-# }
+
+## export results by state as text files
+for(STATE in mrb.states){
+  data %>%
+    st_drop_geometry %>%
+    filter(stusps == STATE) %>%
+    write_parquet(paste0('output/mrb_emissions_reductions_text/mrb_emissions_reductions_text_', STATE, '.parquet'))
+}
 
 ## read results by state as text files (from above)
 ## function to read all files in a directory
