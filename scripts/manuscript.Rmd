@@ -249,7 +249,7 @@ set.seed(42)
 ## number of simulations
 #N = 10 # 12/11/2023 3 minutes on laptop
 N = 1e4 # laptop: 9 minutes with pbreplicate, 2 minutes with future_replicate
-        # VM: 86 seconds with future_replicate
+# VM: 86 seconds with future_replicate
 
 plan("multisession") # parallel processing with future_replicate.
 
@@ -320,7 +320,7 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
   preds_tmdl_lakes %<>% 
     mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
   
-
+  
   ## export climate zone specific emissions to extrapolate to mississippi river basin
   emissions.by.type.ch4 = 
     bind_rows(
@@ -407,7 +407,7 @@ emissions.by.type.ch4 = ch4[4, N] ## keep just the final mean... clearly a clean
 # Mean lake specific results for plotting.
 tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
 ch4.by.lake <- list(ch4[6,], # tmdl scenario.  
-            ch4[5,])  %>% # 2010 scenario
+                    ch4[5,])  %>% # 2010 scenario
   flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
   #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
   purrr::map(., function(.x) {
@@ -419,7 +419,7 @@ ch4.by.lake <- list(ch4[6,], # tmdl scenario.
                                   TRUE ~ "FLY YOU FOOLS!")) %>%
       # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
       set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
-       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
       mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
   }) %>%
   # collapse into single data frame.  data.table implementation of rbind is fast
@@ -507,43 +507,43 @@ N = 1e4
 tic() # 2 hours
 ## using for loop because i need to reference index i.
 for (i in 1:N) {
-
+  
   ## print where you are in the loop
   print(i)
-
+  
   ## distribution of coefficients
   coefs = MASS::mvrnorm(1, mu = coef(mod.co2), Sigma = vcov(mod.co2))
-
+  
   ## predictions based on model uncertainty.  log10(CO2-C + offset) [mg co2-c m-2 d-1]
   preds_2010_lakes <- cbind(lakes,
                             dat_2010 %*% coefs)
   preds_tmdl_lakes <- cbind(lakes,
                             dat_tmdl %*% coefs)
-
+  
   ##  Winter rate
   # Data are mixed for CO2.  Jones et al 2016 report uptake during summer and outgassing
   # during winter for midwestern lakes.  Knoll et al reports sustained outgassing for an Ohio
   # Lake.  I think it best to assume that production rates are equal to predicted emissions
   # rates throughout the year.  CO2 produced during periods of ice cover will be emitted to
   # atmosphere during ice out.
-
+  
   #################################
   #################################
   preds_2010_lakes %<>%
     mutate(preds_2010_lakes = pCo2(preds_2010_lakes$`dat_2010 %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
-
+  
   preds_tmdl_lakes %<>%
     mutate(preds_tmdl_lakes = pCo2(preds_tmdl_lakes$`dat_tmdl %*% coefs`)) # unit conversion: mg CO2 m-2 day-1
-
+  
   # scale to entire year.  Assume rates apply to warm, cold, and ice cover days.
   preds_2010_lakes %<>%
     mutate(preds_2010_lakes = (preds_2010_lakes * (365)) * # apply to 365 days
              1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
-
+  
   preds_tmdl_lakes %<>%
     mutate(preds_tmdl_lakes = (preds_tmdl_lakes * (365)) * # apply to 365 days
              1e6 * AREASQKM) # 1000000m2 = 1km2.  new variable in mg CO2 year-1
-
+  
   ## store emissions by type
   emissions.by.type.co2 =
     bind_rows(
@@ -565,33 +565,33 @@ for (i in 1:N) {
     summarize(incr.co2.mean.pct = mean(incr.co2.mean, na.rm = T),
               .groups = 'drop') %>%
     ungroup
-
+  
   ## Add CO2 produced from methanotrophy
   # 2010 first
   co2.from.ch4.2010.i <- co2.from.ch4.2010 %>%
     filter(simulation == i) %>%
     dplyr::select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
-
+  
   preds_2010_lakes %<>%
     mutate(preds_2010_lakes =
              (preds_2010_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
              co2.from.ch4.2010.i)
-
+  
   # tmdl next
   co2.from.ch4.tmdl.i <- co2.from.ch4.tmdl %>%
     filter(simulation == i) %>%
     select(co2.from.ch4.Mg) %>% pull() # co2 from ch4 for all lakes and simulations
-
+  
   preds_tmdl_lakes %<>%
     mutate(preds_tmdl_lakes =
              (preds_tmdl_lakes / (1e3*1e3*1e3)) + # mg->g,g->kg,kg->Mg.1 MG=1 metric ton =1000kg
              co2.from.ch4.tmdl.i) # co2 from ch4 for all lakes/simulations
-
+  
   co2[[i]] <- list(preds_2010_lakes, preds_tmdl_lakes)
-
+  
   ## convert and take difference in predictions and sum across all lakes
   diff_co2[i] <- sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm = T)
-
+  
 }
 toc()
 
@@ -615,7 +615,7 @@ co2.by.lake <- co2 %>% # list of 10,000 elements.  each element is a list of 2 (
                                   TRUE ~ "FLY YOU FOOLS!")) %>%
       # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
       set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
-       # calculate areal emission rate for each lake: g CH4 m-2 year-1.
+      # calculate areal emission rate for each lake: g CH4 m-2 year-1.
       mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
   }) %>%
   # collapse into single data frame.  data.table implementation of rbind is fast
@@ -755,7 +755,7 @@ emissions.by.type.n2o = n2o[2, N]
 # Mean lake specific results for plotting.
 tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
 n2o.by.lake <- list(n2o[3,], # 2010 scenario.  
-            n2o[4,])  %>% # 2010 scenario
+                    n2o[4,])  %>% # 2010 scenario
   flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
   #.[c(1:10, 10001:10011)] %>% # first 10 tmdl and 2010 for development
   purrr::map(., function(.x) {
@@ -767,7 +767,7 @@ n2o.by.lake <- list(n2o[3,], # 2010 scenario.
                                   TRUE ~ "FLY YOU FOOLS!")) %>%
       # remove _2010 and _tmdl from preds column name.  preds_lakes_Mg = preds_2010_lakes_Mg
       set_colnames(c("WB_ID", "AREASQKM", "preds_lakes_Mg", "scenario")) %>%
-       # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
+      # calculate areal emission rate for each lake: g CH4 m-2 year-1.  
       mutate(preds_lakes_g_m2_y = (preds_lakes_Mg / AREASQKM) * ((1e3*1e3)/1e6)) #(Mg->kg, kg->g)/(km2->m2)
   }) %>%
   # collapse into single data frame.  data.table implementation of rbind is fast
@@ -895,7 +895,7 @@ p1 <- ggplot() +
 
 # chl.ecdf as above
 chl.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Chl", x = name)), 
-             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+                   aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
   stat_ecdf(geom="step", pad = FALSE) +
   xlim(0, 125) + # otherwise extreme values obscure patterns
   ylab("Proportion of Lakes") +
@@ -924,7 +924,7 @@ p2 <- ggplot() +
 
 
 tp.ecdf <- ggplot(dplyr::filter(dat.long, grepl(pattern = "Pvv", x = name)), 
-             aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
+                  aes(value * 1000, linetype = scenario)) + # *1000 for mg -> ug
   stat_ecdf(geom="step", pad = FALSE) +
   xlim(0, 250) +
   ylab("Proportion of Lakes") +
@@ -1041,27 +1041,39 @@ index.ninety <- dat.cum.emissions %>%
 ninety <- dat.cum.emissions %>% # grab the row corresponding to 90% of total reductions
   group_by(name) %>%
   slice(index.ninety$index)
-  
+
 ###### make the figure
 dat.cum.emissions %>%
   ggplot(aes(AREASQKM, emission, color = name)) + 
-  geom_point(size = 1) + geom_line() +
+  geom_point(aes(shape = name),
+             size  = 0.6) +
+  geom_line() +
   scale_x_log10() +
   # change name of legend items
-  scale_color_discrete(labels = c(expression(CH[4]), expression(CO[2]), expression(N[2]*O))) +
+  scale_color_manual(values = c('#58AB41', '#CDA4DE', '#FAC80A'),
+                     labels = c(expression(CO[2]), expression(N[2]*O), expression(CH[4])),
+                     breaks = c('co2diffMg', 'n2odiffKg', 'ch4diffMg')) +
+  scale_shape_manual(values = 15:25,
+                     labels = c(expression(CO[2]), expression(N[2]*O), expression(CH[4])),
+                     breaks = c('co2diffMg', 'n2odiffKg', 'ch4diffMg')) +
   ylab(expression(atop("Cumulative emission reductions",
-  paste("(mt ", CO[2], ", mt ", CH[4], ", kg ", N[2], "O)")))) +
+                       paste("(mt ", CO[2], ", mt ", CH[4], ", kg ", N[2], "O)")))) +
   xlab(expression(Waterbody ~ surface ~ area ~ (km^{2}))) +
+  labs(color = '',
+       shape = '') + 
   theme_bw() +
   theme(legend.title = element_blank(),
-        legend.position = "top",
-        legend.margin=margin(0,0,0,0),
-        legend.box.margin=margin(-10,-10,-10,-10),
+        legend.position = "right",
+        # legend.margin=margin(0,0,0,0),
+        # legend.box.margin=margin(-10,-10,-10,-10),
         axis.title = element_text(size = 9),
         axis.text = element_text(size = 7))
 
 
-ggsave(file = "output/figures/Figure5.tiff", width = 3, height = 2.5, units = "in")
+## export
+ggsave(file = "output/figures/Figure5.tiff", width = 5, height = 3.5, units = "in")
+ggsave('output/figures/Figure5.svg', width = 5, height = 3.5)
+
 ```
 
 ## Supplemental Figure 1
@@ -1078,14 +1090,14 @@ dat.lat <- dat.pt %>%
   pivot_longer(cols = !lat) %>%
   # this trick below controls placement of facets
   mutate(name = factor(name, levels = c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y","pDiff", "ChlaDiff")))
- 
+
 # custom labels for facets.  This is a DF containing a custom label for each row in data.lat
 facet.labs <- dat.lat %>% select(name) %>%
   mutate(name = case_when(name == "ch4diff_g_m2_y" ~ "CH[4]", # note subscript picked up below
-                           name == "ChlaDiff" ~ "chlorophyll~a",
-                           name == "co2diff_g_m2_y" ~ "CO[2]",
-                           name == "n2odiff_g_m2_y" ~ "N[2]*O",
-                           name == "pDiff" ~ "total~phosphorus"))
+                          name == "ChlaDiff" ~ "chlorophyll~a",
+                          name == "co2diff_g_m2_y" ~ "CO[2]",
+                          name == "n2odiff_g_m2_y" ~ "N[2]*O",
+                          name == "pDiff" ~ "total~phosphorus"))
 facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
 
 p1 <- ggplot(dat.lat %>% filter(name %in% c("ChlaDiff", "pDiff")), aes(lat, value)) +
@@ -1134,7 +1146,7 @@ ggsave("output/figures/supplementalFigure2.tiff", width = 3, height = 3, units =
 ```
 ## Supplemental Figure 3: ice cover
 ```{r supplementalFig3, fig.cap="Supplemental Figure 3: Number of days per year that waterbodies are ice covered." }
- ggplot() +
+ggplot() +
   geom_sf(data = wsb) +
   geom_sf(data = dat.pt, aes(color = day_of_ice_filled), size =1) +
   geom_sf(data = cbb, fill = "white", size = NA) +
@@ -1169,7 +1181,7 @@ ggplot(dat.pt, aes(x=AREASQKM)) +
   geom_histogram(bins = 75) + 
   scale_x_log10() +
   xlab(expression(Waterbody~surface~area~(km^{2}))) +
-   theme(axis.title = element_text(size = 10))
+  theme(axis.title = element_text(size = 10))
 
 ggsave("output/figures/supplementalFigure5.tiff", width = 3, height = 3, units = "in")
 
@@ -1195,7 +1207,7 @@ dat.pt %>%
   arrange(name)
 
 #nrow(dat.pt) # 4222
-                                       
+
 
 
 
@@ -1204,7 +1216,7 @@ dat.pt %>%
 
 # Manuscript Stats
 Below is a collection of code that corresponds to numeric results reported in the manuscript.  
-  
+
 ## Policy effect on nutrients, chlorophyll, and area GHG emission rates  
 ```{r}
 # how many sites with increased TP and chla under TMDL
@@ -1227,7 +1239,7 @@ dat.pt %>% #
   summarise(across(everything(), ~mean(.) * 1000)) %>%
   mutate(perc_chla = (Chla2010 -  ChlaTMDLnew) / Chla2010 * 100,
          perc_tp = (Pvv2010 - PvvTMDLnew) / Pvv2010 * 100)
-  
+
 # CH4: average change across sites
 map(dat.pt %>% select(ch4diff_g_m2_y, preds_lakes_g_m2_y_2010_ch4), summary) # 6.65
 dat.pt %>% mutate(ch4diff_perc = (ch4diff_g_m2_y / preds_lakes_g_m2_y_2010_ch4) * 100) %>%
@@ -1242,7 +1254,7 @@ dat.pt %>% filter(AREASQKM > 12) %>%
 
 dat.pt %>% filter(AREASQKM > 12) %>% 
   select(AREASQKM, co2diff_g_m2_y, pDiff, ChlaDiff) %>% 
- summarize(meanCo2Large = mean(co2diff_g_m2_y)) # 4 large lakes w/<co2Diff
+  summarize(meanCo2Large = mean(co2diff_g_m2_y)) # 4 large lakes w/<co2Diff
 
 dat.pt %>% mutate(size = case_when(AREASQKM > 12 ~ "big", TRUE ~ "small")) %>%
   {table(.$size)} # only 4 big lakes
