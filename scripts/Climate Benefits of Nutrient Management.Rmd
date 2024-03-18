@@ -2915,49 +2915,259 @@ ggsave(file = "output/figures/Figure5.tiff", width = 3, height = 2.5, units = "i
 
 ## Supplemental Figure 1
 ```{r supplementalFig1}
-# reduction in areal CH4 emission rate vs latitude
-dat.lat <- dat.pt %>%
-  filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
-  mutate(lat = st_coordinates(.)[,2]) %>%
+# version 1 was replaced with Trend Surface analysis figure in version 2
+# 
+# # Version 1:  reduction in areal CH4 emission rate vs latitude
+# dat.lat <- dat.pt %>%
+#   filter(Chla2010 < 0.2 & ChlaDiff > 0) %>%
+#   mutate(lat = st_coordinates(.)[,2]) %>%
+#   st_drop_geometry() %>%
+#   dplyr::select(lat, ChlaDiff, pDiff, contains("diff_g")) %>%
+#   mutate(ChlaDiff = ChlaDiff *1000, # mg/l --> ug/L
+#          pDiff = pDiff * 1000) %>% # mg/l --> ug/L
+#   pivot_longer(cols = !lat) %>%
+#   # this trick below controls placement of facets
+#   mutate(name = factor(name, levels = c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y","pDiff", "ChlaDiff")))
+#  
+# # custom labels for facets.  This is a DF containing a custom label for each row in data.lat
+# facet.labs <- dat.lat %>% select(name) %>%
+#   mutate(name = case_when(name == "ch4diff_g_m2_y" ~ "CH[4]", # note subscript picked up below
+#                            name == "ChlaDiff" ~ "chlorophyll~a",
+#                            name == "co2diff_g_m2_y" ~ "CO[2]",
+#                            name == "n2odiff_g_m2_y" ~ "N[2]*O",
+#                            name == "pDiff" ~ "total~phosphorus"))
+# facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
+# 
+# p1 <- ggplot(dat.lat %>% filter(name %in% c("ChlaDiff", "pDiff")), aes(lat, value)) +
+#   geom_point() +
+#   facet_wrap(~name, scales = "free", 
+#              labeller = as_labeller(facet.labs, # custom labels
+#                                     default = label_parsed)) + # this applies formatting
+#   ylab(expression(atop("Baseline - TMDL", "("*mu*"g"~L^{-1}*")"))) +
+#   theme(axis.title.x = element_blank())
+# 
+# ggsave(p1, file = "output/figures/supplementalFigure1A.tiff", width = 6.9*(2/3), height = 2.5, units = "in")
+# 
+# p2 <- ggplot(dat.lat %>% filter(name %in% c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y")), 
+#              aes(lat, value)) +
+#   geom_point() +
+#   facet_wrap(~name, scales = "free", 
+#              labeller = as_labeller(facet.labs, # custom labels
+#                                     default = label_parsed)) + # this applies formatting
+#   ylab(expression(atop("Baseline - TMDL", "(g"~m^{-2}~year^{-1}*")"))) +
+#   xlab("latitude")
+# ggsave(p2, file = "output/figures/supplementalFigure1B.tiff", width = 7, height = 2.7, units = "in")
+# 
+# # ended up stitching together in .ppt.  Couldn't get separate y-axis labels and proper facet sizes
+# # with cowplot.  
+
+# Version 2: Trend Surface Analysis
+# https://www.css.cornell.edu/faculty/dgr2/_static/files/R_PDF/ex_TrendSurface.pdf
+
+
+# Prepare data
+dat.pt.alber <- dat.pt %>%
+  filter(Chla2010 < 0.2 & ChlaDiff > 0) %>% # remove outliers
+  st_transform(5070) %>% # albers equal area.  want equal distance in cardinal directions
+  mutate(x= st_coordinates(.)[,1], # add longitude as df column
+         y = st_coordinates(.)[,2]) # add latitude as df column
+
+# Trend Surface model for each GHG
+models <- dat.pt.alber %>%
   st_drop_geometry() %>%
-  dplyr::select(lat, ChlaDiff, pDiff, contains("diff_g")) %>%
-  mutate(ChlaDiff = ChlaDiff *1000, # mg/l --> ug/L
-         pDiff = pDiff * 1000) %>% # mg/l --> ug/L
-  pivot_longer(cols = !lat) %>%
-  # this trick below controls placement of facets
-  mutate(name = factor(name, levels = c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y","pDiff", "ChlaDiff")))
- 
-# custom labels for facets.  This is a DF containing a custom label for each row in data.lat
-facet.labs <- dat.lat %>% select(name) %>%
-  mutate(name = case_when(name == "ch4diff_g_m2_y" ~ "CH[4]", # note subscript picked up below
-                           name == "ChlaDiff" ~ "chlorophyll~a",
-                           name == "co2diff_g_m2_y" ~ "CO[2]",
-                           name == "n2odiff_g_m2_y" ~ "N[2]*O",
-                           name == "pDiff" ~ "total~phosphorus"))
-facet.labs <- setNames(facet.labs$name, dat.lat$name) # apply labels to data
+  select(ch4diff_g_m2_y, co2diff_g_m2_y, 
+         n2odiff_g_m2_y, ChlaDiff, pDiff, x, y) %>%
+  pivot_longer(-c(x,y)) %>%
+  group_split(name) %>% # split each dependent variable into list element
+  purrr::set_names(purrr::map_chr(., ~.x$name[1])) %>% # name each list element
+  map(., ~lm(value ~ x * y, data = .)) # linear model for each list element
 
-p1 <- ggplot(dat.lat %>% filter(name %in% c("ChlaDiff", "pDiff")), aes(lat, value)) +
-  geom_point() +
-  facet_wrap(~name, scales = "free", 
-             labeller = as_labeller(facet.labs, # custom labels
-                                    default = label_parsed)) + # this applies formatting
-  ylab(expression(atop("Baseline - TMDL", "("*mu*"g"~L^{-1}*")"))) +
-  theme(axis.title.x = element_blank())
+map(models, summary) # cardinal directions significant for all variables
 
-ggsave(p1, file = "output/figures/supplementalFigure1A.tiff", width = 6.9*(2/3), height = 2.5, units = "in")
+# Extract residuals
+m_resid <- map(models, ~residuals(.) %>% tibble::enframe(name = NULL))
 
-p2 <- ggplot(dat.lat %>% filter(name %in% c("ch4diff_g_m2_y", "co2diff_g_m2_y", "n2odiff_g_m2_y")), 
-             aes(lat, value)) +
-  geom_point() +
-  facet_wrap(~name, scales = "free", 
-             labeller = as_labeller(facet.labs, # custom labels
-                                    default = label_parsed)) + # this applies formatting
-  ylab(expression(atop("Baseline - TMDL", "(g"~m^{-2}~year^{-1}*")"))) +
-  xlab("latitude")
-ggsave(p2, file = "output/figures/supplementalFigure1B.tiff", width = 7, height = 2.7, units = "in")
+# residual distributions a bit log_normal, but really not too bad.
+imap(m_resid, ~ggplot(., aes(x=value)) + geom_histogram() +
+       ggtitle(.y))
 
-# ended up stitching together in .ppt.  Couldn't get separate y-axis labels and proper facet sizes
-# with cowplot.  
+# residuals vs fitted
+# yeah, not so great
+imap(models, function(x, .y){
+  plot(x$fitted.values, x$residuals, main = .y)
+  
+})
+
+
+# create grid
+range(dat.pt.alber$x);range(dat.pt.alber$y) # bounding box
+seq.x <- seq(1330000, 1860000, by=2000)  # expand limits relative to above.  Make sure to cover entire watershed
+seq.y <- seq(1670000, 2410000, by=2000) # expand limits relative to above.  Make sure to cover entire watershed
+grid.albers <- expand.grid(x = seq.x, y = seq.y)
+plot(grid.albers$y ~ grid.albers$x, cex=0.1, asp=1) # visualize grid
+
+# predict to grid
+pred_model <- map(models, ~predict.lm(object = ., 
+                                      newdata = grid.albers, 
+                                      interval = "prediction") %>%
+                    cbind(as.data.frame(.), grid.albers) %>% # combine predictions with observations
+                    st_as_sf(., coords = c("x", "y"))) %>% # coerce to sf
+  map(., function(x) {
+    st_crs(x) <- 5070 # set crs as albers
+    x
+  })
+
+
+# clip grid to watershed boundary
+# slow, arcGIS Pro alternative below
+tic() #24 minutes in R on Dell Precision laptop
+pred_grid_clip <- map(pred_model, ~st_intersection(., wsb_albers))
+toc()
+
+# # Alternatively, write to Pro, clip in Pro, then read in
+# # this gives benefit of manually editing out points that
+# # fall outside watershed boundary.
+# # write to disk for clipping in Pro
+# imap(pred_model, ~st_write(., paste0("output/", .y, "_grid.shp"), delete_layer = TRUE))
+# 
+# # clip grid to watershed boundary in Pro, read from disk
+# pred_grid_clip <- fs::dir_ls(path = "output", regexp = "grid_clip.shp") %>%
+#   .[!grepl(".xml|lock", .)] %>%
+#   map(., st_read)
+
+
+names(pred_grid_clip)
+map(pred_grid_clip, st_crs) #5070, good
+
+# watershed boundary
+wsb_albers <- wsb %>% st_transform(5070)
+
+# Maps
+# could generate all 5 with one map call, but difficult
+# to customize legend label, especially if we want to 
+# format with subscripts.
+# using data from Pro now, but switch to pred_grid_clip to keep workflow in R
+# chl figure
+p1 <- ggplot() +
+  geom_sf(data = pred_grid_clip$`output/ChlaDiff_grid_clip.shp`,
+          aes(color = fit*1000)) +
+  geom_sf(data = dat.pt.alber, color = "black", size = 0.1) +
+  annotate("text", x = 1330000, y = 2410000, label = "A") +
+  labs(color = expression(atop(chlorophyll~a~change, (mu*g~L^{-1})))) +
+  geom_sf(data = cbb %>% st_transform(5070), fill = "white", size = 0.1) +
+  theme(panel.background = element_blank(), # plot space background)
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top")  +
+  scale_color_distiller(palette = "OrRd",
+                        direction = 1)
+        
+# TP figure
+p2 <- ggplot() +
+  geom_sf(data = pred_grid_clip$`output/pDiff_grid_clip.shp`,
+          aes(color = fit*1000)) +
+  geom_sf(data = dat.pt.alber, color = "black", size = 0.1) +
+  annotate("text", x = 1330000, y = 2410000, label = "B") +
+  labs(color = expression(atop(phosphorus~change, (mu*g~L^{-1})))) +
+  geom_sf(data = cbb %>% st_transform(5070), fill = "white", size = 0.1) +
+  theme(panel.background = element_blank(), # plot space background)
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top")  +
+  scale_color_distiller(palette = "OrRd",
+                        direction = 1)
+
+# CH4 figure
+p3 <- ggplot() +
+  geom_sf(data = pred_grid_clip$`output/ch4diff_g_m2_y_grid_clip.shp`,
+          aes(color = fit)) +
+  geom_sf(data = dat.pt.alber, color = "black", size = 0.1) +
+  annotate("text", x = 1330000, y = 2410000, label = "C") +
+  labs(color = expression(atop(CH[4]~change, (g~m^{-2}~y^{-1})))) +
+  geom_sf(data = cbb %>% st_transform(5070), fill = "white", size = 0.1) +
+  theme(panel.background = element_blank(), # plot space background)
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top")  +
+  scale_color_distiller(palette = "OrRd",
+                        direction = 1)
+
+
+# CO2 figure
+p4 <- ggplot() +
+  geom_sf(data = pred_grid_clip$`output/co2diff_g_m2_y_grid_clip.shp`,
+          aes(color = fit)) +
+  geom_sf(data = dat.pt.alber, color = "black", size = 0.1) +
+  annotate("text", x = 1330000, y = 2410000, label = "D") +
+  labs(color = expression(atop(CO[2]~change, (g~m^{-2}~y^{-1})))) +
+  geom_sf(data = cbb %>% st_transform(5070), fill = "white", size = 0.1) +
+  theme(panel.background = element_blank(), # plot space background)
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top")  +
+  scale_color_distiller(palette = "OrRd",
+                        direction = 1)
+
+
+# N2O figure
+p5 <- ggplot() +
+  geom_sf(data = pred_grid_clip$`output/n2odiff_g_m2_y_grid_clip.shp`,
+          aes(color = fit)) +
+  geom_sf(data = dat.pt.alber, color = "black", size = 0.1) +
+  annotate("text", x = 1330000, y = 2410000, label = "E") +
+  labs(color = expression(atop(N[2]*O~change, (g~m^{-2}~y^{-1})))) +
+  geom_sf(data = cbb %>% st_transform(5070), fill = "white", size = 0.1) +
+  theme(panel.background = element_blank(), # plot space background)
+        panel.border = element_rect(color = "black", fill = NA), # plot border
+        axis.text = element_text(size = 7),
+        axis.title = element_blank(),
+        #legend.justification = c(0,1), # legend position
+        legend.title = element_text(size=8),
+        legend.text = element_text(size = 6),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        legend.position = "top")  +
+  scale_color_distiller(palette = "OrRd",
+                        direction = 1)
+
+# having trouble getting a satisfactory layout with cowplot.
+# got sick of fighting and arranged each panel in a drawing
+# canvas in Word.
+ggsave(p1, file = "output/figures/supplementalFigure1A.tiff")
+ggsave(p2, file = "output/figures/supplementalFigure1B.tiff")
+ggsave(p3, file = "output/figures/supplementalFigure1C.tiff")
+ggsave(p4, file = "output/figures/supplementalFigure1D.tiff")
+ggsave(p5, file = "output/figures/supplementalFigure1E.tiff")
+
+
+# cowplot::plot_grid(p1, p2, NULL, p3, p4, p5, ncol = 3, nrow = 2, align = "hv")
+# 
+# ggsave(file = "output/figures/trendSurface.tiff", width = 7, height = 2.5, units = "in")
+
 ```
 
 
