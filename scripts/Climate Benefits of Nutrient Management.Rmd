@@ -836,10 +836,10 @@ An alternative approach to estimating uncertainty is to exploit the uncertainty 
 ```{r results='hide', message=FALSE, warning=FALSE}
 ## build data for simulation
 datKR =
-  inner_join(as_tibble(dat.sf), 
-             as_tibble(iceCover))
+  inner_join(st_drop_geometry(dat.sf), 
+             st_drop_geometry(iceCover))
 
-## get lake data, add climate zone and type
+## Add climate zone and type (pond vs reservoir) to lake area and days of ice cover
 ## climate zone and type file created in get_ipcc_climate_zones.r
 lakes =
   left_join(
@@ -865,8 +865,8 @@ cold.days = as.numeric(mdy('03.31.2021') - mdy('11.01.2020')) # 5 months of open
 dat_2010 <-  datKR %>%
   dplyr::select(Chla2010) %>%
   mutate('(Intercept)'=1, # match names in model
-         Chla2010 = log10(Chla2010 * 1e3)) %>% # mg/L chl to ug/L
-  rename('log10(Chlorophyll.a..ug.L.)'=Chla2010) %>% # match names in model
+         Chla2010 = log10(Chla2010 * 1e3)) %>% # log needed for model input: mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)' = Chla2010) %>% # match names in model
   relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
   as.matrix()
 
