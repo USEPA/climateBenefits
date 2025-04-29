@@ -861,8 +861,23 @@ cold.days = as.numeric(mdy('03.31.2021') - mdy('11.01.2020')) # 5 months of open
 ################################  CH4
 #####################################
 
-# load chla model
-mod.chl <- readRDS(file = "store/pChla.rds") # nla07_chl.R
+## 2010 Data
+dat_2010 <-  datKR %>%
+  dplyr::select(Chla2010) %>%
+  mutate('(Intercept)'=1, # match names in model
+         Chla2010 = log10(Chla2010 * 1e3)) %>% # log needed for model input: mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)' = Chla2010) %>% # match names in model
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
+
+## TMDL Data
+dat_tmdl <-  datKR %>%
+  dplyr::select(ChlaTMDLnew) %>%
+  mutate('(Intercept)'=1,
+         ChlaTMDLnew = log10(ChlaTMDLnew * 1e3)) %>% # mg/L chl to ug/L
+  rename('log10(Chlorophyll.a..ug.L.)'=ChlaTMDLnew) %>%
+  relocate('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
+  as.matrix()
 
 ####  PREDICTIONS
 
@@ -882,54 +897,8 @@ plan("multisession") # parallel processing with future_replicate.
 tic()
 ch4 <- future_replicate(N, { ## future_replicate used parallel processing
   
-## Distribution of coefficients for CH4 model
+  ## Distribution of coefficients 
   coefs = MASS::mvrnorm(1, mu = coef(mod.ch4), Sigma = vcov(mod.ch4))
-  
-## Distribution of coefficients chla model
-  coefs_chla = MASS::mvrnorm(1, mu = coef(mod.chl), Sigma = vcov(mod.chl))
-  
-  
-  
-## 2010 Data for iteration i
-  dat_2010 <- datKR %>%
-    rowwise() %>% # needed for rnorm
-    mutate(
-      # simulate uncertainty in Nvv and Pvv using model fit statistics
-      # presented in Milstead 2013, Table 2, H6. Note that Nvv and Pvv
-      # in datKR are in mg/L, same units used in Milstead. The chl and
-      # GHG models require ug/L, however, and unit conversions are executed
-      # below.
-      Nvv2010_sim = rnorm(1, Nvv2010, sd = 0.21), 
-      Pvv2010_sim = rtruncnorm(n = 1, a = 1.461529e-06, b = Inf, mean = Pvv2010, sd = 0.36)) %>% 
-    select(Pvv2010, Pvv2010_sim, Nvv2010, Nvv2010_sim) %>%
-    ggplot(aes(Pvv2010, Pvv2010_sim)) + geom_point() + scale_x_log10() + scale_y_log10()
-    ungroup %>% # remove rowwise grouping
-    mutate(
-      # rename variable to be consistent with models
-      `log10(Nvv)` = log10(Nvv2010 * 1000), # used in mod.chl. mg -> ug (units required for chl model)
-      `log10(TP..ug.L.)` = log10(Pvv2010 * 1000), # used in mod.chl and mod.co2. mg -> ug (units required for chl and GHG model)
-      `(Intercept)` = 1, # match names in mod.ch4 model
-      # predict chla using Bryan's model trained on NLA07
-      'log10(Chlorophyll.a..ug.L.)' = coefs_chla["(Intercept)"] + 
-                                      (`log10(TP..ug.L.)` * coefs_chla["`log10(TP..ug.L.)`"]) +
-                                      (`log10(Nvv)` * coefs_chla["`log10(Nvv)`"])) %>% # 
-    select('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
-    as.matrix()
-  
-## TMDL Data for iteration i
-dat_tmdl <- datKR %>%
-    mutate(
-      # rename variable to be consistent with models
-      `log10(Nvv)` = log10(NvvTMDLnew), # used in mod.chl
-      `log10(TP..ug.L.)` = log10(PvvTMDLnew), # used in mod.chl and mod.co2
-      `(Intercept)` = 1, # match names in mod.ch4 model
-      # predict chla using Bryan's model trained on NLA07
-      'log10(Chlorophyll.a..ug.L.)' = coefs_chla["(Intercept)"] + 
-                                      (`log10(TP..ug.L.)` * coefs_chla["`log10(TP..ug.L.)`"]) +
-                                      (`log10(Nvv)` * coefs_chla["`log10(Nvv)`"])) %>% # 
-    select('(Intercept)','log10(Chlorophyll.a..ug.L.)') %>%
-    as.matrix()
-
   
   ## Predictions based on model uncertainty
   preds_2010_lakes <- cbind(lakes,
