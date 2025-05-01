@@ -15,6 +15,11 @@ new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"
 if(length(new.packages)) install.packages(new.packages, repos = "http://cran.rstudio.com/")
 lapply(list.of.packages, library, character.only = TRUE)
 
+library(magrittr)
+library(tidyverse)
+library(sf)
+library(arrow)
+
 ##########################
 #################### parts
 ##########################

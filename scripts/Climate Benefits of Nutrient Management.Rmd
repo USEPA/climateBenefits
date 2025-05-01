@@ -25,6 +25,7 @@ library(readxl) # read excel file readData.R
 library(sf) # spatial data
 library(USAboundaries) # for states map in Methods section
 library(maps) # county map in 'Plots of total emission reductions per county'
+library(geodata) # NLCD data
 library(kableExtra) # nice tables
 library(MASS)
 library(magrittr)
@@ -921,11 +922,11 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
   ## we want a truncated normal such that winter rates don't extend beyond the tails of the summer emission rates
   ## JB:  I concur.  Large negative values during the winter aren't realistic.
   # set.seed(42)
-  ch4.winter.truncated <- rtruncnorm(n = nrow(lakes), a = -1, b = 4e3, mean = 10.56, sd = 11.52)
+  ch4.winter.truncated <- rtruncnorm(n = nrow(lakes), a = 0, b = 4e3, mean = 10.56, sd = 11.52)
   
   ## plot histogram comparing normal to truncated normal
-  # b <- min(c(ch4.winter,ch4.winter.truncated)) - 0.001 # Set the minimum for the breakpoints
-  # e <- max(c(ch4.winter,ch4.winter.truncated)) + 0.5 # Set the maximum for the breakpoints
+  # b <- min(c(ch4.winter, ch4.winter.truncated)) - 0.001 # Set the minimum for the breakpoints
+  # e <- max(c(ch4.winter, ch4.winter.truncated)) + 0.5 # Set the maximum for the breakpoints
   # ax <- pretty(b:e, n = 20) # Make a neat vector for the breakpoints
   # c1 <- rgb(173,216,230,max = 255, alpha = 80, names = "lt.blue")
   # c2 <- rgb(255,192,203, max = 255, alpha = 80, names = "lt.pink")
@@ -957,7 +958,18 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
              ((((preds_2010_lakes * warm.days) + (ch4.winter.truncated * (cold.days - day_of_ice_filled))) ) +   
                 # second half of summation is mg CH4 produced under ice that remains after methanotrophy
                 (ch4.winter.truncated * day_of_ice_filled * (1-ch4.prop.methantrophy))) * 
-             1e6 * AREASQKM) #1000000m2=1km2.
+             1e6 * AREASQKM, # 1,000,000 m2 = 1 km2
+           winter_ch4 = 
+             # first half of summation is mg CH4 produced during open-water cold days
+             ((ch4.winter.truncated * (cold.days - day_of_ice_filled)) +
+             # second half of summation is mg CH4 produced under ice that remains after methanotrophy
+                (ch4.winter.truncated * day_of_ice_filled * (1-ch4.prop.methantrophy))) *
+             1e6 * AREASQKM, # 1000000 m2 = 1 km2
+           warm_ch4 = 
+             # now calculate how much CH4 was produced during warm days
+             preds_2010_lakes - winter_ch4
+           )
+             
   
   preds_tmdl_lakes %<>% 
     mutate(preds_tmdl_lakes = # calculated in units of mg CH4 per year
@@ -965,12 +977,22 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
                 # tmdl.winter term modifies the winter rate to reflect TMDL on winter production
                 ((ch4.winter.truncated * tmdl.winter) * (cold.days - day_of_ice_filled)) + # cold days CH4 under TMDL (mg CH4/m2)
                 ((ch4.winter.truncated * tmdl.winter) * day_of_ice_filled * (1 - ch4.prop.methantrophy))) * # add ch4 that remains after methanotrophy (mg CH4/m2)
-             1e6 * AREASQKM) #1000000m2=1km2.
+             1e6 * AREASQKM, # 1000000 m2 = 1 km2
+           winter_ch4 = 
+             # first half of summation is mg CH4 produced during open-water cold days
+             (((ch4.winter.truncated * tmdl.winter) * (cold.days - day_of_ice_filled)) +
+             # second half of summation is mg CH4 produced under ice that remains after methanotrophy
+             ((ch4.winter.truncated * tmdl.winter) * day_of_ice_filled * (1-ch4.prop.methantrophy))) *
+              1e6 * AREASQKM, # 1000000 m2 = 1 km2
+           warm_ch4 = 
+             # now calculate how much CH4 was produced during warm days
+             preds_tmdl_lakes - winter_ch4
+    )
   
   preds_2010_lakes %<>% 
-    mutate(preds_2010_lakes = preds_2010_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
+    mutate(across(c(preds_2010_lakes, winter_ch4, warm_ch4), ~ .x / (1e3*1e3*1e3))) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg.  
   preds_tmdl_lakes %<>% 
-    mutate(preds_tmdl_lakes = preds_tmdl_lakes / (1e3*1e3*1e3)) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
+    mutate(across(c(preds_tmdl_lakes, winter_ch4, warm_ch4), ~ .x / (1e3*1e3*1e3))) # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
   
   # preds_2010_lakes %<>% mutate(preds_2010_lakes = ((preds_2010_lakes * (7*30)) + # emissions during 7 warm months (April 1 - Nov. 1)
   #                                                    (ch4.winter * ((5*30)-day_of_ice_filled))) * # 5 months of open-water winter rates, discounted by days of ice
@@ -1047,8 +1069,17 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
     preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
     
     # row 6:  lake specific results for tmdl scenario
-    preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes))
-})
+    preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes),
+  
+    # row 7: winter and warm weather emissions
+    seasonal_ch4 = bind_cols(preds_tmdl_lakes %>% 
+                               rename(winter_ch4_tmdl = winter_ch4, warm_ch4_tmdl = warm_ch4) %>%
+                               select(winter_ch4_tmdl, warm_ch4_tmdl),
+                             preds_2010_lakes %>%
+                               rename(winter_ch4_2010 = winter_ch4, warm_ch4_2010 = warm_ch4) %>%
+                               select(winter_ch4_2010, warm_ch4_2010))
+  ) # close list
+}) # close future_replicate
 toc()
 plan("sequential") # turn off parallel processing
 
@@ -1068,11 +1099,15 @@ co2.from.ch4.tmdl = data.frame(co2.from.ch4.Mg = unlist(ch4[3,]), # 1 MG = 1 met
 
 emissions.by.type.ch4 = ch4[4, N] ## keep just the final mean... clearly a cleaner way but this works
 
-
+# CH4 emissions by season for each scenario
+seasonal_ch4 <- map_df(ch4["seasonal_ch4",], \(x) x %>%
+   summarize(across(contains("winter"), sum),
+             across(contains("warm"), sum))
+  ) 
 
 ## CALCULATE AVERAGE AREAL EMISSION RATES, BY LAKE, ACROSS ALL ITERATIONS OF SIMULATION---------
 # Mean lake specific results for plotting.
-tic() # 3.9 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
+tic() # 1.5 min with map, much faster than future_map.  Also future_map maxes RAM, even on VM.  
 ch4.by.lake <- list(ch4[6,], # tmdl scenario.  
             ch4[5,])  %>% # 2010 scenario
   flatten() %>% # code above nests two lists of 10,000 elements in main list.  Flatten creates a list of 20,000 elements
@@ -1104,6 +1139,7 @@ summary(co2.from.ch4.2010)
 summary(co2.from.ch4.tmdl)
 emissions.by.type.ch4
 head(ch4.by.lake)
+head(seasonal_ch4)
 
 ## clean house
 #rm(ch4)
@@ -1443,7 +1479,7 @@ dat.sf <- inner_join(dat.sf, st_drop_geometry(iceCover)) %>% # merge lake data w
   # Each object has WB_ID and AREASQKM
   reduce(full_join, by = c("WB_ID", "AREASQKM")) # keep all records
 
-# any change in number of obsservations? - NO, good
+# any change in number of observations? - NO, good
 list(dat.sf, iceCover, ch4.by.lake, co2.by.lake, n2o.by.lake) %>% 
   purrr::map(., dim) # all have 4222 lakes
 dim(dat.sf) # 4222 lakes!
@@ -1484,11 +1520,11 @@ kr_simulations %>%
 # dat.sf is polygon object
 dim(dat.sf) # 4222
 class(dat.sf) # spatial
-plot(dat.sf$geometry) #test, looks good
+plot(st_geometry(dat.sf)) #test, looks good
 
 # Now create object for plotting points
 dat.pt <- st_centroid(dat.sf)
-plot(dat.pt$geometry)
+plot(st_geometry(dat.pt))
 ```
 
 
@@ -1945,7 +1981,7 @@ st_crs(cnty.us.tigris) # 4326, WGS84
 st_crs(cnty.us.tigris) == st_crs(wsb) #TRUE
 
 # clip county to Chesapeake watershed
-cnty <- sf::st_intersection(x = cnty.us.tigris, y = wsb) # not working
+cnty <- sf::st_intersection(x = cnty.us.tigris, y = wsb) 
 st_crs(cnty)
 
 # need to project cnty to dat.pt
@@ -3470,6 +3506,72 @@ dat.cum.emissions %>%
 
 ```
 
+## Seasonal CH4 emissions
+```{r}
+# winter proportion of emissions under TMDL and 2010
+seasonal_ch4 %>%
+  mutate(
+    # annual avoided emissions 
+    inc_ch4_annual = (winter_ch4_2010 + warm_ch4_2010) - (winter_ch4_tmdl + warm_ch4_tmdl),
+    # warm weather avoided emissions
+    inc_ch4_warm = warm_ch4_2010 - warm_ch4_tmdl,
+    # cold weather avoided emissions
+    inc_ch4_winter = winter_ch4_2010 - winter_ch4_tmdl,
+    # proportion of annual emissions occuring during winter: TMDL
+    winter_prop_tmdl = winter_ch4_tmdl / (warm_ch4_tmdl + winter_ch4_tmdl),
+    # proportion of annual emissions occuring during summer: 2010
+    winter_prop_2010 = winter_ch4_2010 / warm_ch4_2010) %>%
+  summarise(
+    # Avoided emissions
+    inc_ch4_annual = mean(inc_ch4_annual), # annual
+    inc_ch4_warm = mean(inc_ch4_warm), # warm weather
+    inc_ch4_winter = mean(inc_ch4_winter), # cold weather
+    # proportion of annual emissions occuring during winter: TMDL
+    uppr_winter_prop_tmdl = quantile(winter_prop_tmdl, .95), # upper 95%
+    lowr_winter_prop_tmdl = quantile(winter_prop_tmdl, .05), # lower 5%
+    winter_prop_tmdl = mean(winter_prop_tmdl), # mean
+    # proportion of annual emissions occuring during winter: 2010    
+    uppr_winter_prop_2010 = quantile(winter_prop_2010, .95), # upper 95%
+    lowr_winter_prop_2010 = quantile(winter_prop_2010, .05), # lower 5%
+    winter_prop_2010 = mean(winter_prop_2010), # mean
+    # proportion of annual avoided emissions that were avoided during winter
+    inc_ch4_winter_prop = mean(inc_ch4_winter / inc_ch4_annual))
+```
+
+## Latitudinal pattern in land use
+```{r}
+
+# NLCD cropland data
+crop_cb <- geodata::landcover(var = "cropland", path = "store") %>%
+  terra::crop(., wsb, mask = TRUE) %>% # crop to watershed
+  terra::as.points() # convert to SpatVector
+
+coords <- as.data.frame(terra::geom(crop_cb)) # extract lat, lon
+values <- crop_cb$cropland # prop land cover per cell
+
+crop_dat <- bind_cols(coords$x, coords$y, values) %>%
+  setNames(c("x", "y", "values"))
+
+# NLCD built data
+built_cb <- geodata::landcover(var = "built", path = "store") %>%
+terra::crop(., wsb, mask = TRUE) %>% # crop to watershed
+  terra::as.points() # convert to SpatVector
+
+coords <- as.data.frame(terra::geom(built_cb)) # extract lat, lon
+values <- built_cb$built # prop land cover per cell
+
+built_dat <- bind_cols(coords$x, coords$y, values) %>%
+  setNames(c("x", "y", "values"))
+
+# Model
+list(crop_dat, built_dat) %>%
+  map(., ~lm(values ~ x * y, data = .)) %>% # linear model for each list element
+  map(., summary) # cardinal directions significant for all variables
+
+
+
+```
+
 # Write data for collaborators
 ```{r eval=FALSE}
 # select columns of interest, convert units
@@ -3483,3 +3585,9 @@ dat.yr.sf.all %>%
   write.table(., paste0("C:\\Users\\JBEAULIE\\Environmental Protection Agency (EPA)\\Moore, Chris - Climate benefits of nutrient management\\Lakes Modeling\\climateBenefitsResults", Sys.Date(), ".txt"))
 
 ```
+
+
+
+
+
+
