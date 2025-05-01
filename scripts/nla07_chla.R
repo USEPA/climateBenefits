@@ -16,6 +16,7 @@ NLA %<>%
 #Estimate Chla
 chla_mod <- with(NLA, lm(`log10(Chlorophyll.a..ug.L.)` ~ `log10(TP..ug.L.)` + `log10(Nvv)`)) #linear model for Chla from NLA
 summary(chla_mod)
+sqrt(mean(chla_mod$residuals^2))
 saveRDS(chla_mod, file = "store/pChla.rds")
 
 ChesLakeConc[,"Chla_sim"]<-10**predict(CHLA,
