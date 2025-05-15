@@ -1053,25 +1053,25 @@ ch4 <- future_replicate(N, { ## future_replicate used parallel processing
   ## Convert and take difference in predictions and sum across all lakes and store CO2 from methanotrophy
   ## also catch lake-specific results from each iteration
   list(
-    # row 1:  CH4 incremental change, summed across all lakes
+    # element 1:  CH4 incremental change, summed across all lakes
     incr.ch4 = sum(preds_2010_lakes$preds_2010_lakes - preds_tmdl_lakes$preds_tmdl_lakes, na.rm=TRUE),
     
-    # row 2:  CO2 produced via methanotrophy under ice in 2010
+    # element 2:  CO2 produced via methanotrophy under ice in 2010
     methanotrophy.co2.2010 = (ch4.winter.truncated * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
     
-    # row 3:  CO2 produced via methanotrophy under ice in tmdl scenario
+    # element 3:  CO2 produced via methanotrophy under ice in tmdl scenario
     methanotrophy.co2.tmdl =   (ch4.winter.truncated * tmdl.winter * preds_2010_lakes$day_of_ice_filled * 1e6 * preds_2010_lakes$AREASQKM * ch4.prop.methantrophy * (ch4.to.co2) * (44/16)) / (1e3*1e3*1e3), # mg->g, g->kg, kg->Mg. 1 MG = 1 metric ton = 1000kg
     
-    # row 4:  emissions by IPCC categories for MRB extrapolation
+    # element 4:  emissions by IPCC categories for MRB extrapolation
     emissions.by.type.ch4,
     
-    # row 5: lake specific results for 2010 scenario
+    # element 5: lake specific results for 2010 scenario
     preds_2010_lakes %<>% rename(preds_2010_lakes_Mg = preds_2010_lakes),
     
-    # row 6:  lake specific results for tmdl scenario
+    # element 6:  lake specific results for tmdl scenario
     preds_tmdl_lakes %<>% rename(preds_tmdl_lakes_Mg = preds_tmdl_lakes),
   
-    # row 7: winter and warm weather emissions
+    # element 7: winter and warm weather emissions
     seasonal_ch4 = bind_cols(preds_tmdl_lakes %>% 
                                rename(winter_ch4_tmdl = winter_ch4, warm_ch4_tmdl = warm_ch4) %>%
                                select(winter_ch4_tmdl, warm_ch4_tmdl),
@@ -3503,6 +3503,17 @@ dat.cum.emissions %>%
   mutate(prop.less.1 = 1 - (emission / max))
 
 
+# % reduction by gas
+dat.pt %>%
+  st_drop_geometry() %>%
+  summarize(across(matches(c("Mg_2010|Mg_tmdl")), sum)) %>%
+  mutate(ch4_diff_percent = ((preds_lakes_Mg_2010_ch4 - preds_lakes_Mg_tmdl_ch4) / preds_lakes_Mg_2010_ch4) * 100,
+         co2_diff_percent = ((preds_lakes_Mg_2010_co2 - preds_lakes_Mg_tmdl_co2) / preds_lakes_Mg_2010_co2) * 100,
+         n2o_diff_percent = ((preds_lakes_Mg_2010_n2o - preds_lakes_Mg_tmdl_n2o) / preds_lakes_Mg_2010_n2o) * 100)
+                   
+                   _n2o = sum(preds_lakes_Mg_2010_n2o, na.rm = TRUE),
+            preds_lakes_Mg_tmdl_n2o = sum(preds_lakes_Mg_tmdl_n2o, na.rm = TRUE)
+  "preds_lakes_Mg_2010_n2o"     "preds_lakes_Mg_tmdl_n2o"
 
 ```
 
