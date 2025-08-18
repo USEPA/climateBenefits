@@ -62,7 +62,9 @@ ms_watershed <- st_read('store\\Miss_RiverBasin\\Miss_RiverBasin.shp') %>%
   mutate(aes = 'Mississippi/Atchafalaya\nWatershed') %>%
   st_transform(crs = st_crs(watershed))
 
-tic() # 96 seconds at home.  12sec in office.  read in list of lakes in watershed
+# read in comid and globalid of lakes in watershed
+# see get_ghg_waterbodies_in_mrb.R
+tic() # 96 seconds at home.  12sec in office.  
 ms_lakes_ <- list.files('output/lakes_in_mrb/', 
                         pattern = "*.parquet", 
                         full.names = T) %>%
@@ -71,10 +73,11 @@ toc()
 nrow(ms_lakes_) # 3,908,549
 head(ms_lakes_)
 unique(ms_lakes_$comid) # 289, including NA
-table(ms_lakes_$comid) # several have many duplicates?  These are polygons broken up by intersection with state or NWI
+table(ms_lakes_$comid, useNA = "ifany") # several have many duplicates?  These are polygons broken up by intersection with state or NWI
+unique(ms_lakes_$globalid) %>% length()# 3,893,265, including NA
 
 
-# Read in all US flooded lands
+# Read in all US flooded land polygons
 us_flood_lds <- st_read('store/climateBenefits.gpkg', 'national') %>%
   mutate(aes = 'Waterbodies') %>%
   st_transform(crs = st_crs(watershed))
@@ -85,15 +88,16 @@ us_flood_lds %>% st_drop_geometry %>% filter(comid %in% unique(na.omit(ms_lakes_
 us_flood_lds %>% st_drop_geometry %>% filter(globalid %in% unique(na.omit(ms_lakes_$globalid))) %>% nrow #3,897,585
 
 
-
-tic() # 19.5 seconds. filter out those included in MS watershed
+# subset flooded lands polygons in MARB watershed
+tic() # 19.5 seconds. 
 ms_lakes <- us_flood_lds %>% filter((comid %in% unique(na.omit(ms_lakes_$comid)))| 
                                       (globalid %in% unique(na.omit(ms_lakes_$globalid))))
 toc()
 nrow(ms_lakes) #3,909,203
 
-# make subset for code development 
-#ms_lakes <- ms_lakes %>% slice_sample(prop = 0.10)
+# make subset for code development.
+# using all lakes
+ms_lakes <- ms_lakes %>% slice_sample(prop = 0.10)
 # ms_lakes %>%
 #   ggplot() +
 #   geom_sf(color = NA, fill = "deepskyblue2") + theme_void()
@@ -144,7 +148,7 @@ cb_study_area <- ggplot() +
   theme_void() +
   #ggsn::north(data=states,location="topleft", scale =0.25) + 
   scalebar(data=states,location="bottomright",
-           transform=T,dist=50,dist_unit="mi", st.size = 2) +
+           transform=T,dist=100,dist_unit="km", st.size = 2) +
   labs(fill='') +
   theme(legend.position = c(0.1, 0.9),
         legend.key = element_rect(color=NA),
@@ -155,7 +159,7 @@ cb_study_area <- ggplot() +
 ms_study_area <- ggplot() +
   geom_sf(data=ms_states,color='black',alpha=0.05) + 
   geom_sf(data=ms_watershed, fill="#996633", alpha = 0.4) + 
-  geom_sf(data=ms_lakes, color='deepskyblue2', size = 0.1, aes(fill=aes)) + 
+  geom_sf(data=ms_lakes, color='deepskyblue2', size = 0.01, aes(fill=aes)) + 
   geom_sf_text(data=ms_states, aes(label=stusps)) +
   scale_fill_manual(values='deepskyblue2') +
   # scale_color_carto_d(type ="diverging", palette="Earth") +
@@ -163,7 +167,7 @@ ms_study_area <- ggplot() +
   ggsn::north(data=ms_states,location = "bottomright",
               scale = 0.2) + 
   scalebar(data=ms_states,location="bottomleft",
-           transform=T,dist=250,dist_unit="mi", st.size = 2) +
+           transform=T,dist=500,dist_unit="km", st.size = 2) +
   labs(fill='') +
   ggtitle("Mississippi/Atchafalya Watershed") +
   theme(legend.position = c(0.15, 0.17),
@@ -176,6 +180,7 @@ ms_study_area <- ggplot() +
 #   draw_plot(ms_study_area, x=0.25, y=0.01, width = 0.75) +
 #   draw_plot(region, x = 0.05, y = 0.75, width = 0.35, height = 0.35)
 
+tic() # 2 minutes with 10% of polygons
 top_row <- plot_grid(region, cb_study_area)
 plot <- plot_grid(top_row, ms_study_area, ncol=1)
 ggsave(filename = "output\\figures\\combined_study_area.png", 
@@ -183,6 +188,6 @@ ggsave(filename = "output\\figures\\combined_study_area.png",
        width = 6, 
        height = 8,
        dpi = 300)
-
+toc()
 
 ## END OF SCRIPT. Have a great day! 
